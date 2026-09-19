@@ -271,13 +271,18 @@ def main():
         print(f"replayed {sent} registration(s)")
         return
 
-    print(f"badge bridge -> {a.server}   (Ctrl+C to stop)")
+    print(f"team registration bridge -> {a.server}   (Ctrl+C to stop)")
+    print("  (only needed while registering teams; trading goes over the radio node)")
+    waiting = False
     while True:
         port = a.port or find_badge_port()
         if not port:
-            print("  waiting for the badge to be plugged in...")
+            if not waiting:
+                waiting = True
+                print("  no badge on USB - plug the organizer badge in to register teams")
             time.sleep(3)
             continue
+        waiting = False
         try:
             bridge = Bridge(open_port(port), a.server, token)
             print(f"  listening on {port}")
