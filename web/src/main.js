@@ -113,10 +113,18 @@ function renderMarkets() {
       </button>`;
     }).join('');
     const win = resolved ? held(m, m.winner) : 0;
+    const t = m.team;
+    const teamLine = t ? [t.project, t.table && `table ${t.table}`,
+      t.members?.length && `${t.members.length} member${t.members.length > 1 ? 's' : ''}`]
+      .filter(Boolean).map(esc).join(' · ') : '';
     return `<article class="market">
-      ${resolved ? `<span class="badge">RESOLVED: ${esc(m.outcomes[m.winner])}</span>` : ''}
+      ${resolved ? `<span class="badge">RESOLVED: ${esc(m.outcomes[m.winner])}</span>`
+        : t ? '<span class="badge team">TEAM</span>' : ''}
       <h4>${esc(m.question)}</h4>
+      ${teamLine ? `<p class="resolves">${teamLine}</p>` : ''}
       ${m.resolves ? `<p class="resolves">Resolves: ${esc(m.resolves)}</p>` : ''}
+      ${m.createSig ? `<p class="resolves"><a href="${chain.explorer('tx', m.createSig)}" target="_blank" rel="noopener"
+        title="The creation transaction contains a SHA-256 hash of this question and its outcomes">question locked on-chain &#10003;</a></p>` : ''}
       ${rows}
       ${win > 0 ? `<button class="primary" data-redeem="${esc(m.slug)}">Redeem ${fmt(win, 2)} HACK</button>` : ''}
     </article>`;
@@ -193,6 +201,13 @@ async function poll() {
 
 async function pollBoard() {
   try { S.board = await (await fetch('/api/leaderboard')).json(); renderBoard(); } catch { /* ignore */ }
+  // Teams are registered throughout the event; pick up new markets without a
+  // page refresh. Team markets are listed after the event-wide ones.
+  try {
+    const meta = await (await fetch('/api/markets')).json();
+    meta.sort((a, b) => (a.kind === 'team') - (b.kind === 'team'));
+    if (meta.length !== S.meta.length) { S.meta = meta; await poll(); }
+  } catch { /* ignore */ }
 }
 
 // ----------------------------------------------------------------- wallet
@@ -366,7 +381,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet)
       fetch('/api/markets').then((r) => r.json()),
     ]);
     chain.init(config);
-    S.meta = meta;
+    S.meta = meta.sort((a, b) => (a.kind === 'team') - (b.kind === 'team'));
     const prog = $('prog');
     prog.textContent = short(config.programId);
     prog.href = chain.explorer('address', config.programId);

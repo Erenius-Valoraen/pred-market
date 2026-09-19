@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0d12" />
+  <meta name="robots" content="noindex" />
+  <title>HTN Market Admin</title>
+  <link rel="stylesheet" href="/src/style.css" />
+  <style>
+    .admin { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 16px; }
+    .admin label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+    .admin input, .admin textarea {
+      background: var(--bg); border: 1px solid var(--line); color: var(--text);
+      border-radius: 10px; padding: 12px; font: 16px system-ui, sans-serif;
+    }
+    .admin textarea { min-height: 96px; resize: vertical; }
+    .grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+    .mk { display: flex; justify-content: space-between; gap: 10px; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .mk:last-child { border-bottom: 0; }
+    .mk .q { font-size: 14px; }
+    .mk .acts { display: flex; gap: 6px; flex-shrink: 0; }
+    .mk .acts button { padding: 6px 10px; font-size: 13px; }
+    .done { color: var(--green); font-size: 13px; }
+    .result { font-size: 14px; line-height: 1.6; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><div><h1>HTN Market &middot; Admin</h1>
+      <p class="tag">Register teams and resolve markets. Organizers only.</p></div></div>
+    <a class="pill" href="/">View market</a>
+  </header>
+
+  <main class="admin">
+    <div class="panel" id="auth-panel">
+      <h3>Organizer token</h3>
+      <div class="row"><input id="token" type="password" autocomplete="off" placeholder="Paste the admin token" />
+      <button id="token-save">Unlock</button></div>
+      <p class="status" id="auth-status"></p>
+    </div>
+
+    <form class="panel" id="team-form" hidden>
+      <h3>Register a team</h3>
+      <div class="grid2">
+        <label>Team name *<input id="team" required maxlength="48" autocomplete="off" /></label>
+        <label>Table<input id="table" maxlength="12" autocomplete="off" /></label>
+      </div>
+      <label>Project<input id="project" maxlength="80" autocomplete="off" /></label>
+      <label>Members (one per line)<textarea id="members" placeholder="Ada Lovelace&#10;Alan Turing"></textarea></label>
+      <button class="primary" type="submit" id="team-go">Open market on Solana</button>
+      <div class="result" id="team-result"></div>
+    </form>
+
+    <div class="panel" id="list-panel" hidden>
+      <h3>Markets</h3>
+      <p class="muted small">Resolving is final and happens on-chain. Only do it after the result is announced.</p>
+      <div id="list"></div>
+    </div>
+  </main>
+  <script type="module" src="/src/admin.js"></script>
+</body>
+</html>

@@ -98,6 +98,7 @@ h3 { font-size: 14px; margin: 0 0 10px; }
   align-self: flex-start; font-size: 11px; padding: 3px 8px; border-radius: 999px;
   background: #0f2a1f; color: var(--green); border: 1px solid #1f5a40; font-weight: 600;
 }
+.badge.team { background: #1d1740; color: #b3a2ff; border-color: #3a2f78; }
 .outcome {
   display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
   text-align: left; padding: 9px 10px; border-radius: 10px; width: 100%;

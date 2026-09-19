@@ -8,6 +8,7 @@
     "test": "node --test test/lmsr.test.js test/market.test.js",
     "seed": "node src/seed-onchain.js",
     "e2e": "node src/onchain-e2e.js",
+    "verify": "node src/verify.js",
     "build": "vite build --config web/vite.config.js",
     "dev": "vite --config web/vite.config.js",
     "serve": "node server/server.js"

@@ -15,8 +15,9 @@ import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { operatorKeypair, mintAmount, DATA_DIR, UNIT } from '../src/chain.js';
 import { connection, withRetry, sendIxs, RPC_URL } from '../src/rpc.js';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { PROGRAM_ID, loadDeployment, outcomeMintPda } from '../src/client.js';
-import { loadMarkets } from '../src/seed-onchain.js';
+import { loadMarkets, registerTeam, resolveMarket } from '../src/registry.js';
 import * as lmsr from '../src/lmsr.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,31 @@ function saveFaucet() {
 }
 const ipHits = new Map();           // ip -> [timestamps]
 const inFlight = new Set();         // wallets currently being funded
+
+// ------------------------------------------------------------------- admin
+// A random token, created once and kept in data/ (gitignored). Anyone holding
+// it can register teams and resolve markets, so share it only with organizers.
+const ADMIN_TOKEN_FILE = path.join(DATA_DIR, 'admin-token.txt');
+if (!fs.existsSync(ADMIN_TOKEN_FILE)) {
+  fs.writeFileSync(ADMIN_TOKEN_FILE, randomBytes(18).toString('base64url'), { mode: 0o600 });
+}
+const ADMIN_TOKEN = fs.readFileSync(ADMIN_TOKEN_FILE, 'utf8').trim();
+
+function isAdmin(req) {
+  const got = Buffer.from(String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''));
+  const want = Buffer.from(ADMIN_TOKEN);
+  return got.length === want.length && timingSafeEqual(got, want);   // no timing leak
+}
+
+// Admin writes read-modify-write markets.json and spend operator SOL, so run
+// them strictly one at a time; two organizers registering at once must not
+// clobber each other.
+let adminQueue = Promise.resolve();
+function serialized(fn) {
+  const run = adminQueue.then(fn, fn);
+  adminQueue = run.catch(() => {});
+  return run;
+}
 
 function cleanName(s) {
   return String(s ?? '').replace(/[^\p{L}\p{N} ._'-]/gu, '').trim().slice(0, 32);
@@ -135,6 +161,21 @@ async function route(req, url, body) {
   if (url.pathname === '/api/markets') return [200, loadMarkets()];
   if (url.pathname === '/api/leaderboard') return [200, await leaderboard()];
   if (url.pathname === '/api/faucet' && req.method === 'POST') return handleFaucet(req, body);
+
+  if (url.pathname.startsWith('/api/admin/')) {
+    if (!isAdmin(req)) return [401, { error: 'admin token required' }];
+    if (url.pathname === '/api/admin/check') return [200, { ok: true }];
+    if (url.pathname === '/api/admin/team' && req.method === 'POST') {
+      const r = await serialized(() => registerTeam(op, HACK, body));
+      boardCache.at = 0;
+      return [200, r];
+    }
+    if (url.pathname === '/api/admin/resolve' && req.method === 'POST') {
+      const r = await serialized(() => resolveMarket(op, String(body.slug), Number(body.winner)));
+      boardCache.at = 0;
+      return [200, r];
+    }
+  }
   return [404, { error: 'not found' }];
 }
 
@@ -143,7 +184,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 
 function serveStatic(res, pathname) {
-  const rel = pathname === '/' ? '/index.html' : pathname;
+  const rel = pathname === '/' ? '/index.html' : pathname === '/admin' ? '/admin.html' : pathname;
   const file = path.resolve(DIST, `.${decodeURIComponent(rel)}`);
   if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     const index = path.join(DIST, 'index.html');
@@ -175,4 +216,5 @@ http.createServer(async (req, res) => {
 }).listen(PORT, () => {
   console.log(`htn-market server on http://localhost:${PORT}`);
   console.log(`program ${PROGRAM_ID.toBase58()}  HACK ${HACK.toBase58()}`);
+  console.log(`admin page: http://localhost:${PORT}/admin  (token in ${ADMIN_TOKEN_FILE})`);
 });
