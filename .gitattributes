@@ -1,0 +1,4 @@
+# The badge firmware rejects CRLF in manifest.cfg ("malformed line ending").
+# Git on Windows would otherwise convert these on checkout, producing a badge
+# app that silently fails to load. Force LF for everything that goes onto it.
+badge/** text eol=lf

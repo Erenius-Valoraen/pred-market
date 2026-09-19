@@ -12,3 +12,7 @@ program/target/
 
 # frontend build output (npm run build)
 web/dist/
+
+# python bytecode
+__pycache__/
+*.pyc
