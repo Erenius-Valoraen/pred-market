@@ -8,6 +8,7 @@
 export const SEED_MARKETS = [
   {
     id: 'submissions',
+    short: 'Devpost project count',
     question: 'How many projects will be submitted to HTN 2026 on Devpost?',
     outcomes: ['Under 200', '200-299', '300-399', '400+'],
     subsidy: 300,
@@ -17,6 +18,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'hw-finalist',
+    short: 'Hardware finalist?',
     question: 'Will a hardware project be named a Finalist?',
     outcomes: ['YES', 'NO'],
     subsidy: 200,
@@ -26,6 +28,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'grand-category',
+    short: 'Best Overall category',
     question: 'What kind of project wins Best Overall?',
     outcomes: ['AI / agents', 'Hardware / robotics', 'Web or mobile app', 'Dev tools / infra', 'Other'],
     subsidy: 300,
@@ -35,6 +38,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'badge-wins',
+    short: 'Badge project wins?',
     question: 'Will a project built on the Hacker Badge win any prize?',
     outcomes: ['YES', 'NO'],
     subsidy: 200,
@@ -44,6 +48,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'qnx-pi',
+    short: 'QNX winner on a Pi?',
     question: 'Will the QNX prize winner run on a Raspberry Pi?',
     outcomes: ['YES', 'NO'],
     subsidy: 150,
@@ -53,6 +58,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'rox-solo',
+    short: 'Rox $10k to team of 4?',
     question: 'Will the Rox $10k grand prize go to a team of 4?',
     outcomes: ['YES', 'NO'],
     subsidy: 150,
@@ -62,6 +68,7 @@ export const SEED_MARKETS = [
   },
   {
     id: 'this-market',
+    short: 'This market wins?',
     question: 'Will this prediction market win a prize?',
     outcomes: ['YES', 'NO'],
     subsidy: 250,

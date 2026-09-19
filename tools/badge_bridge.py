@@ -1,8 +1,9 @@
-"""Badge -> market server bridge, with receipts back to the badge.
+"""Badge <-> market server bridge (the laptop end of the organizer badge).
 
-The organizer badge (running Market Register) is plugged in over USB. When the
-organizer presses START it writes registration frames with badge.sys.log,
-which appear on the badge's serial console:
+The organizer badge is plugged in over USB and runs one of two apps:
+
+Market Register (badge/htnmkt_reg) - team registration by bumping badges.
+When the organizer presses START it logs registration frames:
 
     I (123) lua: [htnmkt_reg] HTNREG1 BEGIN <rid> <count>
     I (123) lua: [htnmkt_reg] HTNREG1 M <rid> <index> <badge_id> <name...>
@@ -11,8 +12,17 @@ which appear on the badge's serial console:
 The bridge reassembles a registration, forwards it ONLY when every member
 line arrived, and only once the server has ACCEPTED it writes a receipt back
 onto the badge (appdata/acks.txt, via the console's `put` command). The badge
-marks people registered only when it sees that receipt, so a stopped server
-or bridge shows up on the badge instead of silently losing a team.
+marks people registered only when it sees that receipt.
+
+Market Gateway (badge/htnmkt_gw) - attendees trading from their own badges
+over the badge radio. The gateway logs every frame it hears:
+
+    I (123) lua: [htnmkt_gw] HMU <mac> <rssi> <payload>
+
+which we POST to the server; the server answers with screen lines for that
+badge. We hand frames to the gateway by writing appdata/out.txt with `put`
+and bumping the config value htnmkt_gw.v; the gateway broadcasts them and
+logs "HMG done v=<n>", which is our cue to send the next batch.
 
     python tools/badge_bridge.py [--port COM3] [--server http://localhost:8787]
     python tools/badge_bridge.py --replay capture.log   (no badge needed)
@@ -38,6 +48,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 FRAME = re.compile(r"HTNREG1 (BEGIN|M|END) (.*)$")
 ACK_PATH = "/littlefs/appdata/htnmkt_reg/acks.txt"
 
+# Trading over radio (gateway badge app: badge/htnmkt_gw).
+UPLINK = re.compile(r"HMU ([0-9A-Fa-f:]{17}) (-?\d+) (HM\S.*)$")
+GW_DONE = re.compile(r"HMG done v=(\d+)")
+GW_OUT = "/littlefs/appdata/htnmkt_gw/out.txt"
+GW_BATCH = 16          # frames per file handed to the gateway
+GW_COPIES = 2          # each frame is broadcast this many times (radio is lossy)
+GW_WAIT = 4.0          # max seconds to wait for the gateway to finish a batch
+OUTBOX_EVERY = 0.2     # seconds between polls for async screen updates
+
 
 def find_badge_port():
     """The badge is an ESP32-C3 with native USB (VID 303A)."""
@@ -58,14 +77,14 @@ def open_port(port):
     return s
 
 
-def post(server, token, path, body):
+def post(server, token, path, body, timeout=15):
     req = urllib.request.Request(
         f"{server}{path}",
         data=json.dumps(body).encode(),
         headers={"content-type": "application/json", "authorization": f"Bearer {token}"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -112,11 +131,17 @@ class Bridge:
         self.asm = Assembler()
         self.buf = b""
         self.acked = collections.deque(maxlen=20)   # recent receipts
+        # gateway flow control
+        self.frames = collections.deque()
+        self.gw_v = int(time.time()) % 1_000_000_000
+        self.gw_busy_until = 0.0
+        self.next_outbox = 0.0
+        self.gateway_seen = False
 
     # ------------------------------------------------------------- serial
     def _read_until(self, marker, timeout):
         """Read until `marker` appears. Everything read is kept in self.buf so
-        a registration arriving mid-handshake is still processed afterwards."""
+        a frame arriving mid-handshake is still processed afterwards."""
         got = b""
         end = time.time() + timeout
         while time.time() < end:
@@ -146,7 +171,7 @@ class Bridge:
         else:
             self.log(f"  ! could not write receipt for {rid}; badge will time out and let you retry")
 
-    # ------------------------------------------------------------ frames
+    # ----------------------------------------------------- registration
     def handle(self, done):
         names = ", ".join(x["name"] for x in done["members"])
         try:
@@ -158,17 +183,68 @@ class Bridge:
         self.log(f"  -> {'already queued' if res.get('duplicate') else 'pending team'}: {names}")
         self.ack(done["rid"])
 
+    # ---------------------------------------------------------- trading
+    def uplink(self, mac, rssi, payload):
+        self.gateway_seen = True
+        try:
+            res = post(self.server, self.token, "/api/admin/badge/rx",
+                       {"mac": mac.upper(), "rssi": rssi, "payload": payload}, timeout=5)
+        except (urllib.error.URLError, OSError) as e:
+            self.log(f"  ! server unreachable for badge {mac[-5:]} ({e})")
+            return
+        self.frames.extend(res.get("frames", []))
+
+    def poll_outbox(self):
+        if not self.gateway_seen or time.time() < self.next_outbox:
+            return
+        self.next_outbox = time.time() + OUTBOX_EVERY
+        try:
+            res = post(self.server, self.token, "/api/admin/badge/outbox", {}, timeout=5)
+        except (urllib.error.URLError, OSError):
+            return
+        self.frames.extend(res.get("frames", []))
+
+    def flush_frames(self):
+        """Hand the next batch to the gateway once it finished the last one."""
+        if not self.frames or time.time() < self.gw_busy_until:
+            return
+        batch = [self.frames.popleft() for _ in range(min(GW_BATCH, len(self.frames)))]
+        # Copies are interleaved (A B C A B C) so one burst of interference
+        # can't take out every copy of the same line.
+        body = "".join(f + "\n" for _ in range(GW_COPIES) for f in batch)
+        if not self.put(GW_OUT, body):
+            self.log("  ! gateway put failed; retrying")
+            self.frames.extendleft(reversed(batch))
+            return
+        self.gw_v += 1
+        self.ser.write(f"config htnmkt_gw v {self.gw_v}\r".encode())
+        self.gw_busy_until = time.time() + GW_WAIT
+
+    # -------------------------------------------------------------- loop
+    def line(self, text):
+        m = FRAME.search(text)
+        if m:
+            done = self.asm.feed(m.group(1), m.group(2))
+            if done:
+                self.handle(done)
+            return
+        m = UPLINK.search(text)
+        if m:
+            self.uplink(m.group(1), int(m.group(2)), m.group(3))
+            return
+        m = GW_DONE.search(text)
+        if m and int(m.group(1)) == self.gw_v:
+            self.gw_busy_until = 0.0
+
     def pump(self):
         chunk = self.ser.read(512)
         if chunk:
             self.buf += chunk
         while b"\n" in self.buf:
             raw, self.buf = self.buf.split(b"\n", 1)
-            m = FRAME.search(raw.decode("utf-8", "replace").strip())
-            if m:
-                done = self.asm.feed(m.group(1), m.group(2))
-                if done:
-                    self.handle(done)
+            self.line(raw.decode("utf-8", "replace").strip())
+        self.poll_outbox()
+        self.flush_frames()
 
 
 def main():

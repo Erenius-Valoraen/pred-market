@@ -5,7 +5,7 @@
   "private": true,
   "description": "Play-money prediction market on the hackathon itself, registered by tapping badges",
   "scripts": {
-    "test": "node --test test/lmsr.test.js test/market.test.js",
+    "test": "node --test test/lmsr.test.js test/market.test.js test/terminal.test.js",
     "seed": "node src/seed-onchain.js",
     "e2e": "node src/onchain-e2e.js",
     "verify": "node src/verify.js",

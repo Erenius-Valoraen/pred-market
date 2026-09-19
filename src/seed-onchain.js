@@ -14,7 +14,7 @@ const bySlug = new Map(loadMarkets().map((m) => [m.slug, m]));
 for (const def of SEED_MARKETS) {
   const rec = await ensureMarket(op, hack, {
     slug: def.id, question: def.question, outcomes: def.outcomes,
-    subsidy: def.subsidy, resolves: def.meta?.resolves ?? '', kind: 'seed',
+    subsidy: def.subsidy, resolves: def.meta?.resolves ?? '', kind: 'seed', short: def.short,
   });
   // Keep fields recorded at creation time (commitment, sigs) on re-runs.
   bySlug.set(rec.slug, { ...rec, ...bySlug.get(rec.slug), created: rec.created });

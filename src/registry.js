@@ -88,6 +88,7 @@ export async function ensureMarket(op, hack, def) {
     resolves: def.resolves ?? '',
     kind: def.kind ?? 'seed',
     team: def.team ?? null,
+    ...(def.short ? { short: def.short } : {}),   // display only, not committed
   };
   if (exists) return { ...record, created: 'existing' };
 

@@ -19,6 +19,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { PROGRAM_ID, loadDeployment, outcomeMintPda } from '../src/client.js';
 import { loadMarkets, registerTeam, resolveMarket, teamOfBadge, UserError } from '../src/registry.js';
 import * as lmsr from '../src/lmsr.js';
+import { createBadgeBackend } from '../src/badge-backend.js';
+import { Terminal } from '../src/terminal.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(HERE, '..', 'web', 'dist');
@@ -173,6 +175,24 @@ async function leaderboard() {
   return rows;
 }
 
+// ------------------------------------------------------- badge trading
+// Attendees trade from their own badges over the badge radio; the gateway
+// badge + tools/badge_bridge.py relay frames to these two admin endpoints.
+const badgeBackend = createBadgeBackend({
+  op, hack: HACK, marketStates,
+  onWallet(wallet, name) {
+    faucet.wallets[wallet] = { name: cleanName(name), at: Date.now(), badge: true };
+    saveFaucet();
+    boardCache.at = 0;
+  },
+});
+let outbox = [];
+const terminal = new Terminal(badgeBackend, (frames) => { outbox.push(...frames); });
+const refreshBoard = () => leaderboard().then((rows) => badgeBackend.setBoard(rows))
+  .catch((e) => console.error('[badges] leaderboard:', e.message));
+setInterval(refreshBoard, 20_000).unref();
+refreshBoard();
+
 // ---------------------------------------------------------------- handlers
 async function handleFaucet(req, body) {
   let wallet;
@@ -235,6 +255,16 @@ async function route(req, url, body) {
         savePending();
         return { ok: true };
       })];
+    }
+    if (url.pathname === '/api/admin/badge/rx' && req.method === 'POST') {
+      const mac = String(body.mac ?? '').toUpperCase();
+      if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) throw new UserError('bad mac');
+      return [200, { frames: await terminal.handle(mac, String(body.payload ?? '').slice(0, 44)) }];
+    }
+    if (url.pathname === '/api/admin/badge/outbox' && req.method === 'POST') {
+      const frames = outbox;
+      outbox = [];
+      return [200, { frames }];
     }
     if (url.pathname === '/api/admin/resolve' && req.method === 'POST') {
       const r = await serialized(() => resolveMarket(op, String(body.slug), Number(body.winner)));
