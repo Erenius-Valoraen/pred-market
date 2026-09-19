@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Terminal, BTN, ROWS, WIDTH, tagOf } from '../src/terminal.js';
+import { Terminal, BTN, ROWS, WIDTH, FRAME_MAX, tagOf } from '../src/terminal.js';
 
 const MAC = 'E8:F6:0A:29:D3:F4';
-const TAG = '29D3F4';
+const TAG = '9D3F4';
 
 function fake() {
   const markets = [
@@ -38,9 +38,21 @@ function fake() {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 10));
-const decode = (frames) => frames.map((f) => ({ tag: f.slice(3, 9), row: Number(f[9]), text: f.slice(10) }));
+// Reassemble frames the way the badge does: 3 parts per row, joined.
+function decode(frames, screen = {}) {
+  const parts = screen.parts ?? (screen.parts = {});
+  const out = [];
+  for (const f of frames) {
+    if (f[6] === '~') continue;                       // ack
+    const c = f.charCodeAt(6) - 48;
+    parts[c] = f.slice(7);
+    const r = Math.floor(c / 3);
+    out.push({ tag: f.slice(1, 6), row: r, text: (parts[r * 3] ?? '') + (parts[r * 3 + 1] ?? '') + (parts[r * 3 + 2] ?? '') });
+  }
+  return out;
+}
 
-test('tag is the last 6 hex digits of the radio address', () => {
+test('tag is the last 5 hex digits of the radio address', () => {
   assert.equal(tagOf(MAC), TAG);
   assert.equal(tagOf('e8:f6:0a:29:d3:f4'), TAG);
 });
@@ -49,39 +61,44 @@ test('hello draws a full screen, frames fit the 44-byte radio payload', async ()
   const { backend } = fake();
   const emitted = [];
   const t = new Terminal(backend, (f) => emitted.push(...f));
-  const frames = await t.handle(MAC, 'HMK1HAbhi Dutta');
-  assert.equal(frames.length, ROWS);
+  const frames = await t.handle(MAC, 'HMK10HAbhi Dutta');
+  assert.ok(frames.length >= ROWS + 1);
   for (const f of [...frames, ...emitted]) {
-    assert.ok(f.startsWith(`HMD${TAG}`));
-    assert.ok(Buffer.byteLength(f) <= 44, `${f} is ${f.length} bytes`);
+    assert.ok(f.startsWith(`M${TAG}`));
+    assert.ok(Buffer.byteLength(f) <= FRAME_MAX, `${f} is ${f.length} bytes`);
   }
   await settle();
-  const after = decode(emitted);
+  const screen = {};
+  decode(frames, screen);
+  const after = decode(emitted, screen);
   assert.ok(after.some((x) => x.row === 0 && /1,000 HACK/.test(x.text)));
   assert.ok(after.some((x) => /Welcome Abhi!/.test(x.text)));
 });
 
-test('only changed rows are resent; a retried press resends everything', async () => {
+test('only changed parts are resent; a retry repeats the last answer without acting', async () => {
   const { backend } = fake();
   const t = new Terminal(backend, () => {});
-  await t.handle(MAC, 'HMK1H');
+  await t.handle(MAC, 'HMK10H');
   await settle();
-  const moved = decode(await t.handle(MAC, `HMK2${BTN.DOWN}`));
-  assert.deepEqual(moved.map((x) => x.row).sort(), [1, 2]);       // cursor moved between rows 1 and 2
-  const retry = await t.handle(MAC, `HMK2${BTN.DOWN}`);            // same seq = the badge missed our reply
-  assert.equal(retry.length, ROWS);
-  assert.ok(decode(retry).some((x) => x.row === 2 && x.text.startsWith('>')), 'retry must not move again');
+  const first = await t.handle(MAC, `HMK20${BTN.DOWN}`);
+  assert.equal(first[0], `M${TAG}~2`, 'ack comes first');
+  const rows = first.slice(1);
+  assert.deepEqual([...new Set(rows.map((f) => Math.floor((f.charCodeAt(6) - 48) / 3)))].sort(), [1, 2]);
+  assert.ok(rows.length <= 2, 'moving the cursor only changes the first part of two rows');
+  const retry = await t.handle(MAC, `HMK21${BTN.DOWN}`);            // same seq = the badge missed our reply
+  assert.deepEqual(retry, first);
+  assert.equal(t.session(MAC).cursor, 1, 'retry must not move again');
 });
 
 test('buy then sell from the badge', async () => {
   const { backend, calls } = fake();
   const emitted = [];
   const t = new Terminal(backend, (f) => emitted.push(...f));
-  await t.handle(MAC, 'HMK1H');
+  await t.handle(MAC, 'HMK10H');
   await settle();
-  await t.handle(MAC, `HMK2${BTN.A}`);                  // open Aurora
-  await t.handle(MAC, `HMK3${BTN.RIGHT}`);              // spend 50 -> 100
-  const buying = decode(await t.handle(MAC, `HMK4${BTN.A}`));
+  await t.handle(MAC, `HMK20${BTN.A}`);                  // open Aurora
+  await t.handle(MAC, `HMK30${BTN.RIGHT}`);              // spend 50 -> 100
+  const buying = decode(await t.handle(MAC, `HMK40${BTN.A}`));
   assert.ok(buying.some((x) => /Buying YES with 100/.test(x.text)));
   await settle();
   assert.deepEqual(calls[0], ['buy', 'team-aurora', 0, 100]);
@@ -90,7 +107,7 @@ test('buy then sell from the badge', async () => {
   assert.ok(done.some((x) => /> YES x150/.test(x.text)));
 
   emitted.length = 0;
-  await t.handle(MAC, `HMK5${BTN.START}`);
+  await t.handle(MAC, `HMK50${BTN.START}`);
   await settle();
   assert.deepEqual(calls[1], ['sell', 'team-aurora', 0, 150]);
   assert.ok(decode(emitted).some((x) => /Sold for 60/.test(x.text)));
@@ -99,14 +116,14 @@ test('buy then sell from the badge', async () => {
 test('cannot overspend; long questions wrap and stay within width', async () => {
   const { backend, calls } = fake();
   const t = new Terminal(backend, () => {});
-  await t.handle(MAC, 'HMK1H');
+  await t.handle(MAC, 'HMK10H');
   await settle();
-  await t.handle(MAC, `HMK2${BTN.DOWN}`);
-  await t.handle(MAC, `HMK3${BTN.A}`);                  // open the 5-outcome market
-  for (let i = 4; i < 9; i++) await t.handle(MAC, `HMK${i}${BTN.RIGHT}`);   // max spend 500
+  await t.handle(MAC, `HMK20${BTN.DOWN}`);
+  await t.handle(MAC, `HMK30${BTN.A}`);                  // open the 5-outcome market
+  for (let i = 4; i < 9; i++) await t.handle(MAC, `HMK${i}0${BTN.RIGHT}`);   // max spend 500
   const s = t.session(MAC);
   s.acct.cash = 100;
-  const r = decode(await t.handle(MAC, `HMK9${BTN.A}`));
+  const r = decode(await t.handle(MAC, `HMK90${BTN.A}`));
   assert.ok(r.some((x) => /Not enough HACK for 500/.test(x.text)));
   assert.equal(calls.length, 0);
   for (const line of t.lines(s)) assert.ok(line.length <= WIDTH);
@@ -116,8 +133,8 @@ test('cannot overspend; long questions wrap and stay within width', async () => 
 test('leaderboard view marks you', async () => {
   const { backend } = fake();
   const t = new Terminal(backend, () => {});
-  await t.handle(MAC, 'HMK1H');
-  const r = decode(await t.handle(MAC, `HMK2${BTN.AUX1}`));
+  await t.handle(MAC, 'HMK10H');
+  const r = decode(await t.handle(MAC, `HMK20${BTN.AUX1}`));
   assert.ok(r.some((x) => /^>1\. Abhi/.test(x.text)));
   assert.ok(r.some((x) => /You are #1 of 2/.test(x.text)));
 });

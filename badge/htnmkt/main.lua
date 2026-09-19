@@ -1,14 +1,20 @@
 -- HTN Market: trade the hackathon's prediction markets from your badge.
 --
 -- A thin radio terminal: the markets, your wallet and the screen layout live
--- on the laptop behind the gateway badge. This app shows the lines it is
--- sent and sends back button presses. Kept tiny on purpose: Bluetooth needs
--- almost all of the badge's RAM, and every compiled line of Lua costs some.
+-- on the market laptop, which talks to badges with its own Bluetooth. This
+-- app shows the text it is sent and sends back button presses. Kept tiny on
+-- purpose: Bluetooth needs almost all of the badge's RAM, and every compiled
+-- line of Lua costs some.
 --
--- Uplink   (badge -> gateway): "HMK" seq button   e.g. HMK34  (button number)
---                               "HMK" seq "H" name   on open
--- Downlink (gateway -> badge): "HMD" tag row text e.g. HMD29D3F42 Aurora 42%
---   tag = last 6 hex digits of this badge's radio address, row "0".."9".
+-- Uplink   (badge -> laptop): "HMK" seq try button  e.g. HMK304 (button number)
+--                              "HMK" seq try "H" name   on open
+--   try = retry counter, so a retry differs from the advert still on air.
+-- Downlink (laptop -> badge): "M" tag cell text        (<= 20 bytes)
+--   tag = last 5 hex digits of this badge's radio address; cell = char
+--   48 + 3*row + part; a row's text is its 3 parts joined. Short frames fit a
+--   legacy advert, which lets the laptop run many broadcasts at once.
+--   cell "~" = ack: text is the seq of the press the laptop received; we
+--   keep resending a press until its ack arrives.
 
 local ui, radio, ms = badge.ui.label, badge.radio, badge.sys.ms
 local sub, byte, gsub = string.sub, string.byte, string.gsub
@@ -23,7 +29,8 @@ end
 for k in pairs(G) do G[k] = nil end
 cg('collect')
 
-local rows, on, me, seq, pend, tries, at = {}, false, nil, 0, nil, 0, 0
+local rows, parts, on, me, seq, key, tries, at = {}, {}, false, nil, 0, nil, 0, 0
+local heard = false   -- frames arrived since the last full GC
 
 function on_enter(root)
   for r = 1, 10 do
@@ -38,11 +45,14 @@ end
 
 local function tx(k)
   seq = (seq + 1) % 10
-  pend, tries, at = "HMK" .. seq .. k, 0, 0
+  key, tries, at = k, 0, 0
 end
 
 function on_tick()
-  cg('step', 1)
+  -- Every received frame (ours or not) leaves garbage strings behind, and a
+  -- busy venue means many frames. A full GC of this small heap takes a few ms;
+  -- letting garbage pile up instead crashed the badge (Lua peak 24 KB).
+  if heard then heard = false cg('collect') else cg('step', 1) end
   local now = ms()
   if not on then
     if now < at then return end
@@ -53,25 +63,35 @@ function on_tick()
       at = now + 1e9
       return
     end
-    me = "HMD" .. sub((gsub(radio.mac(), ":", "")), -6)
+    me = "M" .. sub((gsub(radio.mac(), ":", "")), -5)
     radio.on_recv(function(_, _, p)
-      if sub(p, 1, 9) == me then
-        local r = rows[byte(p, 10) - 47]
-        if r then r:set_text(sub(p, 11)) pend = nil end
+      heard = true
+      if sub(p, 1, 6) == me then
+        local c = byte(p, 7) - 48
+        if c == 78 then                              -- "~" ack
+          if byte(p, 8) - 48 == seq then key = nil end
+          return
+        end
+        local b = c - c % 3
+        local r = rows[b // 3 + 1]
+        if r then
+          parts[c] = sub(p, 8)
+          r:set_text((parts[b] or "") .. (parts[b + 1] or "") .. (parts[b + 2] or ""))
+        end
       end
     end)
+    rows[1]:set_text("HTN Market - finding the market")
     tx("H" .. sub(nm, 1, 30))
   end
   -- (Re)send the last press until the laptop answers; frames can be lost.
-  if pend and now >= at then
-    tries = tries + 1
-    if tries > 4 then
-      pend = nil
-      rows[10]:set_text("No reply - get closer to the market booth")
+  if key and now >= at then
+    if tries > 5 then
+      key = nil
+      rows[10]:set_text("No reply - get closer to the market laptop")
       return
     end
-    at = now + 1500
-    radio.send(pend)
+    radio.send("HMK" .. seq .. tries .. key)
+    tries, at = tries + 1, now + 2000
   end
 end
 

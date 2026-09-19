@@ -6,18 +6,24 @@
 // themselves (through an injected backend so this file has no chain code and
 // can be tested offline).
 //
-// Wire format (through the gateway badge):
-//   uplink   "HMK" seq key[args]  key = button number, or "H<name>" on open
-//   downlink "HMD" tag row text   tag = last 6 hex of the badge's radio MAC
+// Wire format (laptop Bluetooth <-> badge, see tools/radio_node.py):
+//   uplink   "HMK" seq try key    key = button number, or "H<name>" on open
+//   downlink "M" tag cell text    <= 20 bytes so it fits a legacy advert
+//     tag  = last 5 hex digits of the badge's radio MAC
+//     cell = char(48 + 3*row + part); each row is sent as 3 parts of up to
+//            13 chars that the badge joins back together
+//     cell "~" = ack of press <seq>: the badge resends a press until acked
 
 export const ROWS = 10;
-export const WIDTH = 34;                 // 44-byte payload - 10 bytes of header
+export const WIDTH = 34;                 // characters per row on the badge
+export const PART = 13;                  // 20-byte frame - 7 bytes of header
+export const FRAME_MAX = 20;
 export const BTN = { A: 0, B: 1, HOME: 2, DOWN: 3, LEFT: 4, RIGHT: 5, UP: 6, AUX1: 7, START: 8 };
 const AMOUNTS = [10, 25, 50, 100, 250, 500];
 const LIST_ROWS = 7;
 
 export function tagOf(mac) {
-  return String(mac).replace(/:/g, '').slice(-6).toUpperCase();
+  return String(mac).replace(/:/g, '').slice(-5).toUpperCase();
 }
 
 const fit = (s, n = WIDTH) => {
@@ -68,32 +74,34 @@ export class Terminal {
     let s = this.sessions.get(mac);
     if (!s) {
       s = { mac, tag: tagOf(mac), name: '', view: 'list', cursor: 0, mi: 0, oi: 0, amt: 2,
-        status: '', lastSeq: null, sent: new Array(ROWS).fill(null), busy: false, acct: null };
+        status: '', lastSeq: null, sent: new Array(ROWS * 3).fill(null), last: [], busy: false, acct: null };
       this.sessions.set(mac, s);
     }
     return s;
   }
 
-  /** Handle one uplink frame. Returns the frames to broadcast (may be []). */
+  /** Handle one uplink frame. Returns the frames to broadcast, ack first. */
   async handle(mac, payload) {
-    if (!payload.startsWith('HMK') || payload.length < 5) return [];
+    if (!payload.startsWith('HMK') || payload.length < 6) return [];
     const s = this.session(mac);
     const seq = payload[3];
-    const key = payload.slice(4);
-    // Retries repeat the same seq: answer with the full screen again (the
-    // earlier answer was evidently lost) but don't act twice.
+    return [`M${s.tag}~${seq}`, ...this.respond(s, seq, payload)];
+  }
+
+  respond(s, seq, payload) {
+    const key = payload.slice(5);          // payload[4] is the retry counter
+    // A retry repeats the seq: re-send the current screen (our answer was
+    // evidently lost) but don't act on the press twice.
     const repeat = seq === s.lastSeq;
     s.lastSeq = seq;
     if (key[0] === 'H') {
+      if (repeat) return s.last;
       s.name = key.slice(1).trim().slice(0, 32) || s.name;
       s.sent.fill(null);
       if (!s.acct) this.loadAccount(s);
       return this.render(s);
     }
-    if (repeat) {
-      s.sent.fill(null);
-      return this.render(s);
-    }
+    if (repeat) return s.last;          // resend our last answer, don't act twice
     this.press(s, Number(key));
     return this.render(s);
   }
@@ -214,16 +222,21 @@ export class Terminal {
     return L.map((x) => fit(x));
   }
 
-  /** Frames for rows that changed since we last sent them. */
+  /** Frames for row parts that changed since we last sent them. */
   render(s) {
     const L = this.lines(s);
     const out = [];
     for (let r = 0; r < ROWS; r++) {
-      if (L[r] !== s.sent[r]) {
-        out.push(`HMD${s.tag}${r}${L[r]}`);
-        s.sent[r] = L[r];
+      for (let k = 0; k < 3; k++) {
+        const c = r * 3 + k;
+        const part = L[r].slice(k * PART, (k + 1) * PART);
+        if (part !== s.sent[c]) {
+          out.push(`M${s.tag}${String.fromCharCode(48 + c)}${part}`);
+          s.sent[c] = part;
+        }
       }
     }
+    if (out.length) s.last = out;
     return out;
   }
 }

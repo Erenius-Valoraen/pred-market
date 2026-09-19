@@ -2,8 +2,10 @@
 //
 //   npm run event
 //
-// Starts the market server and the badge bridge, prefixes their output, and
-// restarts either one if it exits (with backoff so a crash loop can't spin).
+// Starts the market server, the radio node (the laptop's Bluetooth talking to
+// attendees' badges) and the USB badge bridge (team registration from the
+// organizer badge), prefixes their output, and restarts any that exits (with
+// backoff so a crash loop can't spin).
 // Run this in your own terminal: it must not depend on an editor or chat
 // session staying open.
 
@@ -16,6 +18,7 @@ const PY = process.platform === 'win32' ? 'python' : 'python3';
 
 const services = [
   { name: 'server', cmd: process.execPath, args: [path.join(ROOT, 'server', 'server.js')] },
+  { name: 'radio', cmd: PY, args: ['-u', path.join(ROOT, 'tools', 'radio_node.py')] },
   { name: 'bridge', cmd: PY, args: ['-u', path.join(ROOT, 'tools', 'badge_bridge.py')] },
 ];
 
@@ -48,7 +51,7 @@ function start(svc, attempt = 0) {
 }
 
 for (const s of services) start(s);
-console.log('event mode: server + badge bridge running. Ctrl+C to stop.');
+console.log('event mode: server + radio node + badge bridge running. Ctrl+C to stop.');
 
 process.on('SIGINT', () => {
   stopping = true;
