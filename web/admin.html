@@ -24,6 +24,13 @@
     .mk .acts button { padding: 6px 10px; font-size: 13px; }
     .done { color: var(--green); font-size: 13px; }
     .result { font-size: 14px; line-height: 1.6; word-break: break-all; }
+    .pend { border: 1px solid #3a2f78; background: #17132e; border-radius: 12px; padding: 14px; margin-top: 10px;
+      display: flex; flex-direction: column; gap: 10px; }
+    .pend ul { margin: 0; padding-left: 18px; font-size: 14px; }
+    .pend .ver { color: var(--green); font-size: 12px; }
+    .pend .warn { color: var(--amber); font-size: 12px; }
+    .pend .btns { display: flex; gap: 8px; }
+    .pend .btns .primary { flex: 1; }
   </style>
 </head>
 <body>
@@ -39,6 +46,12 @@
       <div class="row"><input id="token" type="password" autocomplete="off" placeholder="Paste the admin token" />
       <button id="token-save">Unlock</button></div>
       <p class="status" id="auth-status"></p>
+    </div>
+
+    <div class="panel" id="pending-panel" hidden>
+      <h3>From the badge</h3>
+      <p class="muted small" id="pending-empty">Bump team badges in Connect, then press START in Market Register on the organizer badge.</p>
+      <div id="pending"></div>
     </div>
 
     <form class="panel" id="team-form" hidden>

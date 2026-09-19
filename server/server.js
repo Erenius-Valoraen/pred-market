@@ -17,7 +17,7 @@ import { operatorKeypair, mintAmount, DATA_DIR, UNIT } from '../src/chain.js';
 import { connection, withRetry, sendIxs, RPC_URL } from '../src/rpc.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { PROGRAM_ID, loadDeployment, outcomeMintPda } from '../src/client.js';
-import { loadMarkets, registerTeam, resolveMarket } from '../src/registry.js';
+import { loadMarkets, registerTeam, resolveMarket, teamOfBadge, UserError } from '../src/registry.js';
 import * as lmsr from '../src/lmsr.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +69,56 @@ function serialized(fn) {
   const run = adminQueue.then(fn, fn);
   adminQueue = run.catch(() => {});
   return run;
+}
+
+// ------------------------------------------------------ badge registrations
+// Teams sent from the organizer badge wait here until an organizer names and
+// confirms them on the admin page. Persisted so a restart doesn't lose them.
+const PENDING_FILE = path.join(DATA_DIR, 'pending.json');
+let pending = fs.existsSync(PENDING_FILE) ? JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')) : [];
+function savePending() {
+  const tmp = `${PENDING_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(pending, null, 2));
+  fs.renameSync(tmp, PENDING_FILE);
+}
+
+function addPending(body) {
+  const rid = String(body.rid ?? '').slice(0, 40);
+  if (!rid) throw new UserError('rid required');
+  if (pending.some((p) => p.rid === rid)) return { ok: true, duplicate: true };
+  const members = (Array.isArray(body.members) ? body.members : []).slice(0, 8)
+    .map((m) => ({
+      badgeId: String(m?.badgeId ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 48),
+      name: String(m?.name ?? '').trim().slice(0, 32),
+    }))
+    .filter((m) => m.badgeId && m.name);
+  if (!members.length) throw new UserError('no valid members');
+  pending.push({ rid, members, at: Date.now() });
+  savePending();
+  return { ok: true };
+}
+
+/** Pending registrations, each member annotated if already on a team. */
+function listPending() {
+  const onTeam = teamOfBadge();
+  return pending.map((p) => ({
+    ...p,
+    members: p.members.map((m) => ({ ...m, alreadyOn: onTeam.get(m.badgeId) ?? null })),
+  }));
+}
+
+async function confirmPending(body) {
+  const p = pending.find((x) => x.rid === body.rid);
+  if (!p) throw new UserError('that pending registration no longer exists');
+  const r = await registerTeam(op, HACK, {
+    team: body.team, project: body.project, table: body.table, members: p.members,
+  });
+  // A name clash returns the EXISTING team without adding these members;
+  // keep the pending entry so the organizer can pick a different name.
+  if (r.duplicate) throw new UserError(`a team called "${r.market.team.name}" already exists - use another name`);
+  pending = pending.filter((x) => x.rid !== body.rid);
+  savePending();
+  return r;
 }
 
 function cleanName(s) {
@@ -170,6 +220,22 @@ async function route(req, url, body) {
       boardCache.at = 0;
       return [200, r];
     }
+    if (url.pathname === '/api/admin/pending' && req.method === 'POST') {
+      return [200, await serialized(() => addPending(body))];
+    }
+    if (url.pathname === '/api/admin/pending') return [200, listPending()];
+    if (url.pathname === '/api/admin/pending/confirm' && req.method === 'POST') {
+      const r = await serialized(() => confirmPending(body));
+      boardCache.at = 0;
+      return [200, r];
+    }
+    if (url.pathname === '/api/admin/pending/dismiss' && req.method === 'POST') {
+      return [200, await serialized(() => {
+        pending = pending.filter((x) => x.rid !== body.rid);
+        savePending();
+        return { ok: true };
+      })];
+    }
     if (url.pathname === '/api/admin/resolve' && req.method === 'POST') {
       const r = await serialized(() => resolveMarket(op, String(body.slug), Number(body.winner)));
       boardCache.at = 0;
@@ -207,7 +273,9 @@ http.createServer(async (req, res) => {
       const body = raw ? JSON.parse(raw) : {};
       [status, payload] = await route(req, url, body);
     } catch (e) {
-      console.error(e);
+      // 400 = the request was wrong (fix your input); 500 = we broke.
+      status = e instanceof UserError ? 400 : e instanceof SyntaxError ? 400 : 500;
+      if (status === 500) console.error(e);
       payload = { error: String(e.message ?? e).slice(0, 200) };
     }
     res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });

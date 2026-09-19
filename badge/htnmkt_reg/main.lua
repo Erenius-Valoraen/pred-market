@@ -1,131 +1,150 @@
--- HTN prediction market: register your team by tapping badges.
--- Controls: Up/Down scroll contacts, A broadcast register, B rescan, HOME exit.
+-- HTN Market: organizer badge. Register a team by bumping badges.
+--
+-- Flow: team members bump this badge in the Connect app (that stores their
+-- verified name + badge id as contacts). Open this app: everyone not yet
+-- registered is pre-selected. START sends them over USB serial via
+-- badge.sys.log; the laptop bridge forwards them to the market server, where
+-- an organizer names the team and opens its market.
+--
+-- Controls: Up/Down move, A toggle person, B clear, START send, HOME exit.
+--
+-- Wire format (one log line each, parsed by tools/badge_bridge.py):
+--   HTNREG1 BEGIN <rid> <count>
+--   HTNREG1 M <rid> <index> <badge_id> <name...>
+--   HTNREG1 END <rid>
 
-local PREFIX = "HTNM1:"
-local MAXPAY = 44
+local ROWS = 7
+local SUBMITTED_FILE = "appdata/submitted.txt"
 
-local radio_ok = false
-local sent, recvd, dropped_seen = 0, 0, 0
-local next_send, led_until, led_mode = 0, 0, "idle"
-local idx, n_contacts = 1, 0
-local me_id, me_name = "?", "?"
-local l_me, l_team, l_status, l_peer
+local contacts = {}     -- array of { id = badge_id, name = display name }
+local total, loaded = 0, 0
+local submitted = {}    -- badge_id -> true (already sent in an earlier team)
+local selected = {}     -- badge_id -> true
+local cursor, top = 1, 1
+local rows = {}
+local l_head, l_status
+local flash_until = 0
+local me = nil
+
+local function clean(s, max)
+  s = string.gsub(tostring(s or "?"), "%c", " ")
+  if #s > max then s = string.sub(s, 1, max) end
+  return s
+end
 
 local function leds(r, g, b)
   badge.led.set_all(r, g, b)
   badge.led.show()
 end
 
-local function contact_text()
-  if n_contacts == 0 then
-    return "No bumps yet\nOpen Connect and bump a badge"
+local function load_submitted()
+  local s = badge.fs.read(SUBMITTED_FILE)
+  if s then
+    for id in string.gmatch(s, "[^\n]+") do submitted[id] = true end
   end
-  if idx < 1 then idx = n_contacts end
-  if idx > n_contacts then idx = 1 end
-  local c = badge.contacts.get(idx)
-  if not c then
-    return idx .. "/" .. n_contacts .. "  (unavailable)"
-  end
-  return idx .. "/" .. n_contacts .. "   " .. (c.name or "?")
 end
 
-local function refresh_team()
-  n_contacts = badge.contacts.count() or 0
-  l_team:set_text(contact_text())
+local function count_selected()
+  local n = 0
+  for _ in pairs(selected) do n = n + 1 end
+  return n
 end
 
--- 44-byte radio ceiling: prefix + opcode + badge id, truncated defensively.
-local function register_frame()
-  local body = PREFIX .. "R" .. me_id
-  if #body > MAXPAY then body = string.sub(body, 1, MAXPAY) end
-  return body
+local function redraw()
+  if cursor < top then top = cursor end
+  if cursor > top + ROWS - 1 then top = cursor - ROWS + 1 end
+  for r = 1, ROWS do
+    local i = top + r - 1
+    local c = contacts[i]
+    local t = ""
+    if c then
+      t = (i == cursor and "> " or "  ") .. (selected[c.id] and "[x] " or "[ ] ") .. clean(c.name, 20)
+      if submitted[c.id] then t = t .. " (done)" end
+    end
+    rows[r]:set_text(t)
+  end
+  local extra = ""
+  if loaded < total then extra = "  loading " .. loaded .. "/" .. total end
+  l_head:set_text(count_selected() .. " selected / " .. #contacts .. " bumped" .. extra)
+end
+
+local function send_team()
+  local picked = {}
+  for _, c in ipairs(contacts) do
+    if selected[c.id] then picked[#picked + 1] = c end
+  end
+  if #picked == 0 then
+    l_status:set_text("Pick at least one person with A")
+    return
+  end
+  local rid = tostring(badge.sys.ms()) .. "-" .. tostring(badge.sys.random(99999))
+  badge.sys.log("HTNREG1 BEGIN " .. rid .. " " .. #picked)
+  local ids = {}
+  for i, c in ipairs(picked) do
+    badge.sys.log("HTNREG1 M " .. rid .. " " .. i .. " " .. c.id .. " " .. c.name)
+    submitted[c.id] = true
+    ids[#ids + 1] = c.id
+  end
+  badge.sys.log("HTNREG1 END " .. rid)
+  -- One flash write for the whole team, not one per person.
+  badge.fs.append(SUBMITTED_FILE, table.concat(ids, "\n") .. "\n")
+  selected = {}
+  l_status:set_text("Sent " .. #picked .. " - name the team on the admin page")
+  flash_until = badge.sys.ms() + 700
+  leds(0, 110, 30)
+  redraw()
 end
 
 function on_enter(root)
-  -- Enable Bluetooth FIRST. BLE needs a large contiguous block of system RAM;
-  -- building the UI first fragments the heap (largest block fell to 24 KB)
-  -- and enable() then fails.
-  local s0 = badge.sys.stats()
-  radio_ok = badge.radio.enable()
-  local s1 = badge.sys.stats()
-  badge.sys.log("radio.enable=" .. tostring(radio_ok) ..
-                " free_before=" .. tostring(s0.free_heap) ..
-                " free_after=" .. tostring(s1.free_heap))
+  me = badge.me.badge_id()
 
-  me_id = badge.me.badge_id() or "unprovisioned"
-  me_name = badge.me.name() or "Unknown"
+  local title = badge.ui.label(root, "Register a team")
+  title:align("top_mid", 0, 6)
 
-  local title = badge.ui.label(root, "HTN Market - Register")
-  title:align("top_mid", 0, 10)
+  l_head = badge.ui.label(root, "Reading contacts...")
+  l_head:style({ text_font = 14 })
+  l_head:align("top_mid", 0, 30)
 
-  l_me = badge.ui.label(root, me_name .. "\n" .. me_id)
-  l_me:style({text_font = 14, text_align = "center"})
-  l_me:align("top_mid", 0, 40)
-
-  l_team = badge.ui.label(root, "Reading contacts...")
-  l_team:style({text_font = 18, text_align = "center"})
-  l_team:align("center", 0, -6)
-
-  l_peer = badge.ui.label(root, "No frames received")
-  l_peer:style({text_font = 14, text_align = "center"})
-  l_peer:align("center", 0, 34)
-
-  l_status = badge.ui.label(root, "Starting radio...")
-  l_status:style({text_font = 14})
-  l_status:align("bottom_mid", 0, -34)
-
-  local hint = badge.ui.label(root, "Up/Down team   A register   B rescan")
-  hint:style({text_font = 14})
-  hint:align("bottom_mid", 0, -12)
-
-  refresh_team()
-
-  if radio_ok then
-    l_status:set_text("Radio ready - press A")
-    badge.radio.on_recv(function(mac, rssi, payload)
-      if not payload then return end
-      if string.sub(payload, 1, #PREFIX) ~= PREFIX then return end
-      recvd = recvd + 1
-      l_peer:set_text(string.format("%s  %d dBm  (%d)", mac, rssi, recvd))
-      led_mode, led_until = "rx", badge.sys.ms() + 250
-    end)
-  else
-    l_status:set_text("Radio unavailable")
+  for r = 1, ROWS do
+    local l = badge.ui.label(root, "")
+    l:style({ text_font = 14 })
+    l:set_pos(12, 52 + (r - 1) * 20)
+    rows[r] = l
   end
 
-  -- Crash-proof diagnostics, readable over serial:
-  --   cat /littlefs/appdata/htnmkt_reg/probe.txt
-  badge.fs.write("appdata/probe.txt",
-    "id=" .. me_id ..
-    "\nname=" .. me_name ..
-    "\ncontacts=" .. n_contacts ..
-    "\nradio=" .. tostring(radio_ok) ..
-    "\nmac=" .. tostring(badge.radio.mac()) ..
-    "\nframe_len=" .. #register_frame() ..
-    "\nfw=" .. tostring(badge.sys.version()) .. "\n")
+  l_status = badge.ui.label(root, "Bump team badges in Connect first")
+  l_status:style({ text_font = 14 })
+  l_status:align("bottom_mid", 0, -26)
 
-  badge.sys.log("register: id=" .. me_id .. " contacts=" .. n_contacts ..
-                " radio=" .. tostring(radio_ok))
+  local hint = badge.ui.label(root, "Up/Dn move  A pick  B clear  START send")
+  hint:style({ text_font = 14 })
+  hint:align("bottom_mid", 0, -6)
 
-  leds(0, 0, 40)
+  load_submitted()
+  total = badge.contacts.count() or 0
+  leds(12, 0, 30)
+  redraw()
 end
 
 function on_tick()
   local now = badge.sys.ms()
-  if led_until > 0 and now >= led_until then
-    led_until, led_mode = 0, "idle"
-    leds(0, 0, 40)
-  elseif led_mode == "tx" then
-    leds(0, 90, 0)
-  elseif led_mode == "rx" then
-    leds(0, 80, 90)
+  if flash_until > 0 and now >= flash_until then
+    flash_until = 0
+    leds(12, 0, 30)
   end
-  if radio_ok then
-    local d = badge.radio.dropped()
-    if d and d ~= dropped_seen then
-      dropped_seen = d
-      badge.sys.log("radio dropped=" .. d)
+  -- Load contacts a few per tick so a long contact list never blocks the UI.
+  if loaded < total then
+    local stop = math.min(total, loaded + 8)
+    for i = loaded + 1, stop do
+      local c = badge.contacts.get(i)
+      if c and c.badge_id and c.badge_id ~= me then
+        local item = { id = c.badge_id, name = clean(c.name, 32) }
+        contacts[#contacts + 1] = item
+        if not submitted[item.id] then selected[item.id] = true end
+      end
     end
+    loaded = stop
+    redraw()
   end
 end
 
@@ -133,40 +152,26 @@ function on_button(button, kind)
   if kind ~= badge.input.KIND.PRESSED then return end
   local B = badge.input.BUTTON
   if button == B.UP then
-    idx = idx - 1
-    l_team:set_text(contact_text())
+    if cursor > 1 then cursor = cursor - 1 end
+    redraw()
   elseif button == B.DOWN then
-    idx = idx + 1
-    l_team:set_text(contact_text())
-  elseif button == B.B then
-    refresh_team()
-    l_status:set_text("Rescanned contacts")
+    if cursor < #contacts then cursor = cursor + 1 end
+    redraw()
   elseif button == B.A then
-    if not radio_ok then
-      l_status:set_text("Radio unavailable")
-      return
+    local c = contacts[cursor]
+    if c then
+      if selected[c.id] then selected[c.id] = nil else selected[c.id] = true end
+      redraw()
     end
-    local now = badge.sys.ms()
-    if now < next_send then
-      l_status:set_text("Wait a moment, then A")
-      return
-    end
-    next_send = now + 1000
-    if badge.radio.send(register_frame()) then
-      sent = sent + 1
-      l_status:set_text("Registered (queued) x" .. sent)
-      led_mode, led_until = "tx", now + 250
-    else
-      l_status:set_text("Send failed - retry with A")
-    end
+  elseif button == B.B then
+    selected = {}
+    redraw()
+  elseif button == B.START then
+    send_team()
   end
 end
 
 function on_exit()
-  if radio_ok then
-    badge.radio.on_recv(nil)
-    badge.radio.disable()
-  end
   badge.led.clear()
   badge.led.show()
 end

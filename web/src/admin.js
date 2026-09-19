@@ -27,9 +27,12 @@ async function unlock() {
     await api('/api/admin/check');
     try { localStorage.setItem(KEY, token); } catch { /* ignore */ }
     $('auth-panel').hidden = true;
+    $('pending-panel').hidden = false;
     $('team-form').hidden = false;
     $('list-panel').hidden = false;
     loadList();
+    loadPending();
+    setInterval(loadPending, 3000);
   } catch {
     st.className = 'status err';
     st.textContent = token ? 'That token was rejected.' : '';
@@ -88,6 +91,69 @@ async function loadList() {
   $('list').querySelectorAll('button[data-slug]').forEach((b) => {
     b.onclick = () => resolve(b.dataset.slug, Number(b.dataset.i), markets);
   });
+}
+
+// ------------------------------------------------------- badge registrations
+// Polls every 3s but only re-renders when the SET of pending teams changes,
+// so a team name being typed is never wiped by a refresh.
+let pendingKey = '';
+
+function suggestName(members) {
+  const first = members.map((m) => m.name.split(' ')[0]);
+  if (first.length <= 2) return first.join(' & ');
+  return `${first.slice(0, -1).join(', ')} & ${first[first.length - 1]}`;
+}
+
+async function loadPending() {
+  let list;
+  try { list = await api('/api/admin/pending'); } catch { return; }
+  const key = list.map((p) => p.rid + p.members.map((m) => m.alreadyOn ?? '').join()).join('|');
+  if (key === pendingKey) return;
+  pendingKey = key;
+  $('pending-empty').hidden = list.length > 0;
+  $('pending').innerHTML = list.map((p) => `
+    <div class="pend" data-rid="${esc(p.rid)}">
+      <ul>${p.members.map((m) => `<li>${esc(m.name)}
+        ${m.alreadyOn ? `<span class="warn">already on ${esc(m.alreadyOn)}</span>`
+          : '<span class="ver">&#10003; verified by badge bump</span>'}</li>`).join('')}</ul>
+      <label>Team name *<input class="p-team" maxlength="48" value="${esc(suggestName(p.members))}" /></label>
+      <div class="grid2">
+        <label>Project<input class="p-project" maxlength="80" /></label>
+        <label>Table<input class="p-table" maxlength="12" /></label>
+      </div>
+      <div class="btns"><button class="primary p-go">Open market</button><button class="p-drop">Dismiss</button></div>
+      <div class="result p-out"></div>
+    </div>`).join('');
+  $('pending').querySelectorAll('.pend').forEach((card) => {
+    const rid = card.dataset.rid;
+    card.querySelector('.p-go').onclick = () => confirmPending(card, rid);
+    card.querySelector('.p-drop').onclick = async () => {
+      await api('/api/admin/pending/dismiss', { rid });
+      pendingKey = '';
+      loadPending();
+    };
+  });
+}
+
+async function confirmPending(card, rid) {
+  const out = card.querySelector('.p-out');
+  const btn = card.querySelector('.p-go');
+  btn.disabled = true;
+  out.textContent = 'Creating the market on Solana…';
+  try {
+    const r = await api('/api/admin/pending/confirm', {
+      rid,
+      team: card.querySelector('.p-team').value,
+      project: card.querySelector('.p-project').value,
+      table: card.querySelector('.p-table').value,
+    });
+    out.innerHTML = `<span class="done">Live.</span> ${esc(r.market.question)}`;
+    setTimeout(() => { pendingKey = ''; loadPending(); }, 1500);
+    loadList();
+  } catch (err) {
+    out.innerHTML = `<span class="status err">${esc(err.message)}</span>`;
+    btn.disabled = false;
+  }
 }
 
 async function resolve(slug, winner, markets) {

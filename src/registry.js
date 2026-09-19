@@ -17,6 +17,11 @@ import { connection, withRetry, sendIxs } from './rpc.js';
 import { createMarketIx, marketPda, resolveIx } from './client.js';
 
 export const MARKETS_FILE = path.join(DATA_DIR, 'markets.json');
+
+/** A problem with the request (HTTP 400), as opposed to a server fault (500). */
+export class UserError extends Error {
+  constructor(message) { super(message); this.status = 400; }
+}
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
 export const TEAM_SUBSIDY = 100;   // per-team market; b = 100/ln2 ≈ 144
@@ -97,13 +102,25 @@ export async function ensureMarket(op, hack, def) {
 }
 
 // --------------------------------------------------------------- teams
+/** badge_id -> team name, for every badge-verified member of every team. */
+export function teamOfBadge(list = loadMarkets()) {
+  const map = new Map();
+  for (const m of list) {
+    if (m.kind !== 'team') continue;
+    for (const mem of m.team?.members ?? []) {
+      if (mem.badgeId) map.set(mem.badgeId, m.team.name);
+    }
+  }
+  return map;
+}
+
 /**
  * Register a team and open its market. Members may carry a badge_id: the
  * phone form supplies names only; the badge bridge will supply verified ids.
  */
 export async function registerTeam(op, hack, input) {
   const team = String(input.team ?? '').trim().slice(0, 48);
-  if (!team) throw new Error('team name required');
+  if (!team) throw new UserError('team name required');
   const project = String(input.project ?? '').trim().slice(0, 80);
   const table = String(input.table ?? '').trim().slice(0, 12);
   const members = (Array.isArray(input.members) ? input.members : [])
@@ -118,6 +135,14 @@ export async function registerTeam(op, hack, input) {
   const list = loadMarkets();
   const dupe = list.find((m) => m.kind === 'team' && m.team?.name.toLowerCase() === team.toLowerCase());
   if (dupe) return { market: dupe, duplicate: true };
+
+  // One person, one team. Only enforceable for members whose identity came
+  // from a badge bump (names typed on the phone aren't verified identities).
+  const onTeam = teamOfBadge(list);
+  const clash = members.filter((m) => m.badgeId && onTeam.has(m.badgeId));
+  if (clash.length) {
+    throw new UserError(clash.map((m) => `${m.name} is already on ${onTeam.get(m.badgeId)}`).join('; '));
+  }
 
   // Unique slug even if two teams share a name after slugification.
   let slug = `team-${slugify(team)}`;
@@ -140,9 +165,9 @@ export async function registerTeam(op, hack, input) {
 export async function resolveMarket(op, slug, winner) {
   const list = loadMarkets();
   const m = list.find((x) => x.slug === slug);
-  if (!m) throw new Error(`unknown market ${slug}`);
+  if (!m) throw new UserError(`unknown market ${slug}`);
   if (!Number.isInteger(winner) || winner < 0 || winner >= m.outcomes.length) {
-    throw new Error(`winner must be 0..${m.outcomes.length - 1}`);
+    throw new UserError(`winner must be 0..${m.outcomes.length - 1}`);
   }
   const sig = await sendIxs(op, [resolveIx({ authority: op.publicKey, market: new PublicKey(m.address), winner })]);
   Object.assign(m, { resolvedWinner: winner, resolveSig: sig, resolvedAt: Date.now() });
