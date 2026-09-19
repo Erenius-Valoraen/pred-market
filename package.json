@@ -1,0 +1,17 @@
+{
+  "name": "htn-market",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Play-money prediction market on the hackathon itself, registered by tapping badges",
+  "scripts": {
+    "test": "node --test test/lmsr.test.js test/market.test.js",
+    "seed": "node src/seed.js",
+    "cli": "node src/cli.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3",
+    "@solana/spl-token": "^0.4.8",
+    "bs58": "^6.0.0"
+  }
+}

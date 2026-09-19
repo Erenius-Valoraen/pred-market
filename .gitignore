@@ -1,0 +1,8 @@
+node_modules/
+
+# PRIVATE KEYS AND STATE - never commit.
+# data/ holds the operator keypair (mint authority for HACK) and every
+# custodial user keypair. Anyone with these controls all balances.
+data/
+*.keypair.json
+.env
