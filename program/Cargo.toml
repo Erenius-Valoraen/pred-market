@@ -1,0 +1,17 @@
+[package]
+name = "htn_market"
+version = "0.1.0"
+edition = "2021"
+description = "On-chain LMSR prediction market for Hack the North"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+solana-program = "2"
+# Pure-Rust transcendental functions. On SBF, f64 is soft-float and therefore
+# bit-for-bit deterministic across validators, which consensus requires.
+libm = "0.2"

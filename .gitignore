@@ -6,3 +6,6 @@ node_modules/
 data/
 *.keypair.json
 .env
+
+# Rust build output (we build with CARGO_TARGET_DIR in WSL, but just in case)
+program/target/

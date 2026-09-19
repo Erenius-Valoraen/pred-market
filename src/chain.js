@@ -8,13 +8,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import {
-  Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, clusterApiUrl,
-} from '@solana/web3.js';
-import {
-  createMint, getOrCreateAssociatedTokenAccount, mintTo, transfer,
-  burn, getAccount, getMint,
+  createMint, getAccount, getMint, getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction,
 } from '@solana/spl-token';
+import { connection, sendIxs } from './rpc.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Overridable so demos and tests never touch the real market's state/keys.
@@ -24,8 +23,7 @@ export const DATA_DIR = process.env.MARKET_DATA_DIR
 export const DECIMALS = 6;                 // 1 HACK = 1_000_000 base units
 export const UNIT = 10 ** DECIMALS;
 
-const RPC = process.env.SOLANA_RPC || clusterApiUrl('devnet');
-export const connection = new Connection(RPC, 'confirmed');
+export { connection };
 
 export function toBase(amount) {
   // Round down: never mint/transfer more than the math allowed.
@@ -90,37 +88,32 @@ export async function createTokenMint(operator) {
   return createMint(connection, operator, operator.publicKey, null, DECIMALS);
 }
 
-/** Associated token account for (mint, owner); operator pays the rent. */
-export async function ata(operator, mint, owner) {
-  return getOrCreateAssociatedTokenAccount(connection, operator, mint, owner);
-}
-
+/**
+ * Mint `amount` of a token to `owner`, creating their token account if needed.
+ * One transaction; the operator pays rent and fee. Used only for the play-money
+ * HACK faucet — outcome shares are minted exclusively by the on-chain program.
+ */
 export async function mintAmount(operator, mint, owner, amount) {
-  const acct = await ata(operator, mint, owner);
-  return mintTo(connection, operator, mint, acct.address, operator, toBase(amount));
-}
-
-/** Move tokens from `ownerKp`'s account to `toOwner`'s. Operator pays the fee. */
-export async function transferAmount(operator, mint, ownerKp, toOwner, amount) {
-  const from = await ata(operator, mint, ownerKp.publicKey);
-  const to = await ata(operator, mint, toOwner);
-  return transfer(connection, operator, from.address, to.address, ownerKp, toBase(amount));
-}
-
-/** Destroy tokens (used when a winning position is redeemed). */
-export async function burnAmount(operator, mint, ownerKp, amount) {
-  const acct = await ata(operator, mint, ownerKp.publicKey);
-  return burn(connection, operator, acct.address, mint, ownerKp, toBase(amount));
+  const dest = getAssociatedTokenAddressSync(mint, owner);
+  return sendIxs(operator, [
+    createAssociatedTokenAccountIdempotentInstruction(operator.publicKey, dest, owner, mint),
+    createMintToInstruction(mint, dest, operator.publicKey, toBase(amount)),
+  ]);
 }
 
 export async function tokenBalance(mint, owner) {
-  try {
-    const { getAssociatedTokenAddressSync } = await import('@solana/spl-token');
-    const addr = getAssociatedTokenAddressSync(mint, owner);
-    const acct = await getAccount(connection, addr);
-    return fromBase(acct.amount);
-  } catch {
-    return 0; // no account yet = zero balance
+  const { getAssociatedTokenAddressSync, TokenAccountNotFoundError } = await import('@solana/spl-token');
+  const addr = getAssociatedTokenAddressSync(mint, owner);
+  for (let i = 0; ; i++) {
+    try {
+      return fromBase((await getAccount(connection, addr)).amount);
+    } catch (e) {
+      // Only a genuinely missing account means "zero". Anything else (e.g. a
+      // 429 rate limit) must not be reported as a confident zero balance.
+      if (e instanceof TokenAccountNotFoundError) return 0;
+      if (i >= 6 || !/429|Too Many|fetch failed|ECONNRESET|ETIMEDOUT/i.test(String(e?.message))) throw e;
+      await new Promise((r) => setTimeout(r, 800 * 2 ** i));
+    }
   }
 }
 
