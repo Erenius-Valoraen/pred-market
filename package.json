@@ -6,12 +6,19 @@
   "description": "Play-money prediction market on the hackathon itself, registered by tapping badges",
   "scripts": {
     "test": "node --test test/lmsr.test.js test/market.test.js",
-    "seed": "node src/seed.js",
-    "cli": "node src/cli.js"
+    "seed": "node src/seed-onchain.js",
+    "e2e": "node src/onchain-e2e.js",
+    "build": "vite build --config web/vite.config.js",
+    "dev": "vite --config web/vite.config.js",
+    "serve": "node server/server.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.95.3",
     "@solana/spl-token": "^0.4.8",
-    "bs58": "^6.0.0"
+    "@solana/web3.js": "^1.95.3",
+    "bs58": "^6.0.0",
+    "buffer": "^6.0.3"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
   }
 }

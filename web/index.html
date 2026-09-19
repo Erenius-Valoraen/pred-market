@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0d12" />
+  <title>HTN Market</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237c5cff'/><path d='M7 22l6-7 5 4 7-9' stroke='%2314f195' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#7c5cff"/><path d="M7 22l6-7 5 4 7-9" stroke="#14f195" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <h1>HTN Market</h1>
+        <p class="tag">Prediction markets on Hack the North &middot; priced on-chain by Solana</p>
+      </div>
+    </div>
+    <div id="wallet" class="wallet"></div>
+  </header>
+
+  <div id="notice" class="notice" hidden></div>
+  <section id="onboard"></section>
+
+  <main class="layout">
+    <section>
+      <div class="section-head">
+        <h2>Markets</h2>
+        <span id="live" class="live"><i></i>live from chain</span>
+      </div>
+      <div id="markets" class="markets"><p class="muted">Loading markets from Solana&hellip;</p></div>
+    </section>
+    <aside class="side">
+      <div class="panel">
+        <h3>Your book</h3>
+        <div id="book"><p class="muted">Connect a wallet to trade.</p></div>
+      </div>
+      <div class="panel">
+        <h3>Leaderboard</h3>
+        <ol id="board" class="board"><li class="muted">Loading&hellip;</li></ol>
+      </div>
+      <div class="panel">
+        <h3>Your activity</h3>
+        <ul id="activity" class="activity"><li class="muted">No trades yet.</li></ul>
+      </div>
+    </aside>
+  </main>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <button class="x" id="sheet-close" aria-label="Close">&times;</button>
+      <p class="muted small" id="sheet-q"></p>
+      <h3 id="sheet-title"></h3>
+      <div class="tabs" id="sheet-tabs"></div>
+      <label class="field">
+        <span id="amount-label">Spend (HACK)</span>
+        <input id="amount" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
+      </label>
+      <div class="chips" id="chips"></div>
+      <dl class="quote" id="quote"></dl>
+      <button class="primary" id="go"></button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span>Program <a id="prog" target="_blank" rel="noopener"></a></span>
+    <span>Prices are computed by the program, not this website. Play money on devnet.</span>
+  </footer>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

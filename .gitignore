@@ -9,3 +9,6 @@ data/
 
 # Rust build output (we build with CARGO_TARGET_DIR in WSL, but just in case)
 program/target/
+
+# frontend build output (npm run build)
+web/dist/

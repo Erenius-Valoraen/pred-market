@@ -1,0 +1,178 @@
+// Thin backend. It NEVER prices a trade, holds a user key, or signs a trade.
+//
+//   GET  /api/config        program id, HACK mint, RPC url
+//   GET  /api/markets       human-readable metadata (the chain stores numbers)
+//   POST /api/faucet        one-time 1000 HACK + a little devnet SOL for fees
+//   GET  /api/leaderboard   net worth per registered wallet, read from chain
+//
+// Everything a trade needs is done in the browser, signed by the user.
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { operatorKeypair, mintAmount, DATA_DIR, UNIT } from '../src/chain.js';
+import { connection, withRetry, sendIxs, RPC_URL } from '../src/rpc.js';
+import { PROGRAM_ID, loadDeployment, outcomeMintPda } from '../src/client.js';
+import { loadMarkets } from '../src/seed-onchain.js';
+import * as lmsr from '../src/lmsr.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DIST = path.resolve(HERE, '..', 'web', 'dist');
+const PORT = Number(process.env.PORT || 8787);
+const FAUCET_FILE = path.join(DATA_DIR, 'faucet.json');
+
+const FAUCET_HACK = 1000;
+const FAUCET_SOL = 0.02;            // enough for fees + a few token-account rents
+const IP_LIMIT_PER_HOUR = 6;        // blunt sybil brake for a play-money event
+
+const op = operatorKeypair();
+const dep = loadDeployment();
+if (!dep.hackMint) throw new Error('no HACK mint - run src/onchain-e2e.js first');
+const HACK = new PublicKey(dep.hackMint);
+
+// ---------------------------------------------------------------- faucet db
+const faucet = fs.existsSync(FAUCET_FILE)
+  ? JSON.parse(fs.readFileSync(FAUCET_FILE, 'utf8'))
+  : { wallets: {} };
+function saveFaucet() {
+  const tmp = `${FAUCET_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(faucet, null, 2));
+  fs.renameSync(tmp, FAUCET_FILE);
+}
+const ipHits = new Map();           // ip -> [timestamps]
+const inFlight = new Set();         // wallets currently being funded
+
+function cleanName(s) {
+  return String(s ?? '').replace(/[^\p{L}\p{N} ._'-]/gu, '').trim().slice(0, 32);
+}
+
+// ------------------------------------------------------------ chain reads
+async function marketStates() {
+  const list = loadMarkets();
+  const infos = await withRetry(() =>
+    connection.getMultipleAccountsInfo(list.map((m) => new PublicKey(m.address))));
+  return list.map((m, i) => {
+    const d = infos[i]?.data;
+    if (!d) return { ...m, missing: true };
+    const n = d[3];
+    const q = [];
+    for (let k = 0; k < n; k++) q.push(Number(d.readBigUInt64LE(88 + 8 * k)) / UNIT);
+    const b = Number(d.readBigUInt64LE(80)) / UNIT;
+    return { ...m, q, b, status: d[4] === 0 ? 'open' : 'resolved', winner: d[5], prices: lmsr.prices(q, b) };
+  });
+}
+
+let boardCache = { at: 0, rows: [] };
+async function leaderboard() {
+  if (Date.now() - boardCache.at < 20_000) return boardCache.rows;
+  const markets = await marketStates();
+  // mint address -> value of one share, straight from on-chain prices
+  const shareValue = new Map();
+  for (const m of markets) {
+    if (m.missing) continue;
+    m.outcomes.forEach((_, i) => {
+      const v = m.status === 'resolved' ? (i === m.winner ? 1 : 0) : m.prices[i];
+      shareValue.set(outcomeMintPda(new PublicKey(m.address), i).toBase58(), v);
+    });
+  }
+  const rows = [];
+  for (const [wallet, info] of Object.entries(faucet.wallets)) {
+    const res = await withRetry(() => connection.getParsedTokenAccountsByOwner(
+      new PublicKey(wallet), { programId: TOKEN_PROGRAM_ID }));
+    let cash = 0, positions = 0;
+    for (const a of res.value) {
+      const t = a.account.data.parsed.info;
+      const amt = Number(t.tokenAmount.amount) / UNIT;
+      if (t.mint === HACK.toBase58()) cash += amt;
+      else if (shareValue.has(t.mint)) positions += amt * shareValue.get(t.mint);
+    }
+    rows.push({ wallet, name: info.name || `${wallet.slice(0, 4)}…${wallet.slice(-4)}`,
+      cash, positions, netWorth: cash + positions });
+  }
+  rows.sort((a, b) => b.netWorth - a.netWorth);
+  boardCache = { at: Date.now(), rows };
+  return rows;
+}
+
+// ---------------------------------------------------------------- handlers
+async function handleFaucet(req, body) {
+  let wallet;
+  try { wallet = new PublicKey(body.wallet); } catch { return [400, { error: 'invalid wallet' }]; }
+  const key = wallet.toBase58();
+  if (faucet.wallets[key]) return [200, { ok: true, already: true, ...faucet.wallets[key] }];
+  if (inFlight.has(key)) return [429, { error: 'already being funded' }];
+
+  const ip = req.socket.remoteAddress ?? '?';
+  const hour = Date.now() - 3_600_000;
+  const hits = (ipHits.get(ip) ?? []).filter((t) => t > hour);
+  if (hits.length >= IP_LIMIT_PER_HOUR) return [429, { error: 'faucet limit reached for this network, try later' }];
+
+  inFlight.add(key);
+  try {
+    // SOL for fees first, then HACK.
+    await sendIxs(op, [SystemProgram.transfer({
+      fromPubkey: op.publicKey, toPubkey: wallet, lamports: Math.round(FAUCET_SOL * LAMPORTS_PER_SOL),
+    })]);
+    const sig = await mintAmount(op, HACK, wallet, FAUCET_HACK);
+    hits.push(Date.now());
+    ipHits.set(ip, hits);
+    faucet.wallets[key] = { name: cleanName(body.name), at: Date.now() };
+    saveFaucet();
+    boardCache.at = 0;
+    return [200, { ok: true, hack: FAUCET_HACK, sol: FAUCET_SOL, signature: sig }];
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function route(req, url, body) {
+  if (url.pathname === '/api/config') {
+    return [200, { programId: PROGRAM_ID.toBase58(), hackMint: HACK.toBase58(), rpc: RPC_URL, decimals: 6 }];
+  }
+  if (url.pathname === '/api/markets') return [200, loadMarkets()];
+  if (url.pathname === '/api/leaderboard') return [200, await leaderboard()];
+  if (url.pathname === '/api/faucet' && req.method === 'POST') return handleFaucet(req, body);
+  return [404, { error: 'not found' }];
+}
+
+// ------------------------------------------------------------------ static
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+
+function serveStatic(res, pathname) {
+  const rel = pathname === '/' ? '/index.html' : pathname;
+  const file = path.resolve(DIST, `.${decodeURIComponent(rel)}`);
+  if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    const index = path.join(DIST, 'index.html');
+    if (!fs.existsSync(index)) { res.writeHead(404); return res.end('frontend not built: npm run build'); }
+    res.writeHead(200, { 'content-type': TYPES['.html'] });
+    return fs.createReadStream(index).pipe(res);
+  }
+  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+}
+
+http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  if (!url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname);
+  let raw = '';
+  req.on('data', (c) => { raw += c; if (raw.length > 4096) req.destroy(); });
+  req.on('end', async () => {
+    let status = 500, payload = { error: 'internal error' };
+    try {
+      const body = raw ? JSON.parse(raw) : {};
+      [status, payload] = await route(req, url, body);
+    } catch (e) {
+      console.error(e);
+      payload = { error: String(e.message ?? e).slice(0, 200) };
+    }
+    res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+    res.end(JSON.stringify(payload));
+  });
+}).listen(PORT, () => {
+  console.log(`htn-market server on http://localhost:${PORT}`);
+  console.log(`program ${PROGRAM_ID.toBase58()}  HACK ${HACK.toBase58()}`);
+});
