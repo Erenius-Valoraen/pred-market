@@ -14,7 +14,7 @@ import * as chain from './chainlib.js';
 import * as wallets from './wallet.js';
 import {
   $, $$, el, esc, fmt, pct, pct1, short, animate, press, popIn, stagger,
-  rollTo, sparkline, toast, confetti, moveIndicator, SPRING,
+  rollTo, sparkline, priceChart, slideTo, toast, confetti, moveIndicator, SPRING,
 } from './ui.js';
 
 const S = {
@@ -28,6 +28,39 @@ const bySlug = (slug) => S.markets.find((m) => m.slug === slug);
 const held = (m, i) => (!S.wallet || !m.pubkey ? 0
   : S.balances.get(chain.outcomeMintPda(m.pubkey, i).toBase58()) ?? 0);
 const isBinary = (m) => m.outcomes.length === 2 && m.outcomes[0] === 'YES';
+
+/** A market trades under a symbol, like anything else worth betting on. */
+const STOP = new Set(['WILL', 'THE', 'A', 'AN', 'OF', 'TO', 'ON', 'IN', 'AT', 'BE', 'IS', 'ANY',
+  'WIN', 'WINS', 'RUN', 'GO', 'MANY', 'HOW', 'WHAT', 'KIND', 'PROJECT', 'PROJECTS', 'TEAM', 'THIS']);
+function symbol(m) {
+  const base = m.team?.name ?? m.short ?? m.question;
+  const words = String(base).toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  const keep = words.filter((w) => !STOP.has(w));
+  const pick = keep.length ? keep : words;
+  if (pick.length === 1) return pick[0].slice(0, 4);
+  return pick.slice(0, 4).map((w) => w[0]).join('');
+}
+
+/** Price history for one outcome, oldest sample first. */
+function series(m, i) {
+  return (S.history[m.slug] ?? []).map((row) => row.p?.[i]).filter((x) => typeof x === 'number');
+}
+
+/** Change since the oldest sample we kept, in percentage points. */
+function movement(m, i) {
+  const h = series(m, i);
+  if (h.length < 2) return null;
+  return Math.round((m.prices[i] - h[0]) * 100);
+}
+
+function moveBadge(delta) {
+  if (delta === null || delta === 0) return '<span class="move flat">no move yet</span>';
+  const up = delta > 0;
+  return `<span class="move ${up ? 'up' : 'down'}">${up ? '\u25b2' : '\u25bc'} ${Math.abs(delta)} pts</span>`;
+}
+
+/** Shares outstanding: how much conviction is actually riding on this. */
+const stakes = (m) => (m.q ?? []).reduce((a, b) => a + b, 0);
 
 function netWorth() {
   let positions = 0;
@@ -66,59 +99,99 @@ function renderWallet() {
 // ----------------------------------------------------------- market cards
 function marketCard(m) {
   const resolved = m.status === 'resolved';
-  const hist = S.history[m.slug] ?? [];
   const lead = m.prices.indexOf(Math.max(...m.prices));
   const shown = isBinary(m) ? 0 : lead;
-  const rising = hist.length > 1 ? hist.at(-1) >= hist[0] : true;
+  const delta = movement(m, shown);
+  const hist = series(m, shown);
   const team = m.team;
   const sub = team
-    ? [team.project, team.table && `table ${team.table}`].filter(Boolean).map(esc).join(' · ')
+    ? [team.project, team.table && `table ${team.table}`].filter(Boolean).map(esc).join(' \u00b7 ')
     : esc(m.resolves ?? '');
 
+  // Two outcomes is a tug of war; more than two is a race between lanes.
   const body = isBinary(m)
-    ? `<div class="sides">
-        ${['YES', 'NO'].map((name, i) => {
-          const h = held(m, i);
-          const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (i === 0 ? 'yes' : 'no');
-          return `<button class="side ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
-            <span class="name">${name}</span>
-            <span class="price num">${pct(m.prices[i])}</span>
-            ${h > 0 ? `<span class="held">you hold ${fmt(h, 1)}</span>` : ''}
-          </button>`;
-        }).join('')}
+    ? `<div class="tug" style="--p:${(m.prices[0] * 100).toFixed(1)}%">
+        <div class="tug-bar"><i class="yes"></i><i class="no"></i><span class="knot"></span></div>
+        <div class="sides">
+          ${['YES', 'NO'].map((name, i) => {
+            const h = held(m, i);
+            const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (i === 0 ? 'yes' : 'no');
+            return `<button class="side ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
+              <span class="name">${name}${resolved && i === m.winner ? ' \u00b7 won' : ''}</span>
+              <span class="price num">${pct(m.prices[i])}</span>
+              ${h > 0 ? `<span class="held">you hold ${fmt(h, 1)}</span>` : ''}
+            </button>`;
+          }).join('')}
+        </div>
       </div>`
-    : `<div class="outcomes">
+    : `<div class="race">
         ${m.outcomes.map((o, i) => {
           const h = held(m, i);
-          const cls = resolved ? (i === m.winner ? 'won' : 'lost') : '';
-          return `<button class="outcome-row ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
-            <span>${esc(o)}${h > 0 ? ` <span class="muted small">· you hold ${fmt(h, 1)}</span>` : ''}</span>
-            <span class="pct">${pct(m.prices[i])}</span>
-            <span class="bar"><i style="width:${(m.prices[i] * 100).toFixed(1)}%"></i></span>
+          const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (i === lead ? 'lead' : '');
+          return `<button class="lane ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
+            <span class="who">${esc(o)}${h > 0 ? `<span class="muted small"> \u00b7 you hold ${fmt(h, 1)}</span>` : ''}</span>
+            <span class="pct num">${pct(m.prices[i])}</span>
+            <span class="track"><span class="runner" data-lane="${esc(m.slug)}:${i}"></span></span>
           </button>`;
         }).join('')}
       </div>`;
 
   const win = resolved ? held(m, m.winner) : 0;
-  return `<article class="card market" data-slug="${esc(m.slug)}">
-    <div class="meta">
-      ${resolved ? `<span class="tag">Resolved · ${esc(m.outcomes[m.winner])}</span>`
+  return `<article class="card market ${resolved ? 'resolved' : ''}" data-slug="${esc(m.slug)}">
+    <div class="ticker-head">
+      <span class="sym">$${esc(symbol(m))}</span>
+      ${resolved ? `<span class="tag">Settled \u00b7 ${esc(m.outcomes[m.winner])}</span>`
         : team ? '<span class="tag team">Team</span>' : '<span class="tag">Event</span>'}
+      <span class="spacer"></span>
       ${m.createSig ? `<a class="small muted" href="${chain.explorer('tx', m.createSig)}" target="_blank" rel="noopener"
-        title="The creation transaction contains a SHA-256 hash of this question and its outcomes">locked on-chain ✓</a>` : ''}
+        title="The creation transaction contains a SHA-256 hash of this question and its outcomes">locked \u2713</a>` : ''}
     </div>
     <h3>${esc(m.question)}</h3>
-    <div class="headline">
+    <div class="quote-line">
       <div>
         <div class="label">${isBinary(m) ? 'Chance' : esc(m.outcomes[shown])}</div>
-        <div class="big num" data-price="${m.slug}">${pct(m.prices[shown])}</div>
+        <div class="big num">${pct(m.prices[shown])}</div>
       </div>
-      ${sparkline(hist, { up: rising })}
+      ${moveBadge(delta)}
+      <span class="spacer"></span>
+      <span class="small muted">${fmt(stakes(m), 0)} shares out</span>
     </div>
+    ${priceChart(hist, { up: (delta ?? 0) >= 0 })}
     ${body}
     ${sub ? `<p class="small muted" style="margin:0">${sub}</p>` : ''}
-    ${win > 0 ? `<button class="primary" data-redeem="${esc(m.slug)}">Redeem ${fmt(win, 2)} HACK</button>` : ''}
+    ${win > 0 ? `<button class="primary" data-redeem="${esc(m.slug)}">Collect ${fmt(win, 2)} HACK</button>` : ''}
   </article>`;
+}
+
+/** The strip of live prices along the top: a trading floor has a tape. */
+function renderTape() {
+  const host = $('#tape');
+  if (!host) return;
+  const live = S.markets.filter((m) => !m.missing && m.status !== 'resolved');
+  if (!live.length) { host.innerHTML = ''; return; }
+  const items = live.map((m) => {
+    const i = isBinary(m) ? 0 : m.prices.indexOf(Math.max(...m.prices));
+    const d = movement(m, i);
+    const arrow = d === null || d === 0 ? '\u2014' : `${d > 0 ? '+' : ''}${d}`;
+    return `<button class="tape-item" data-slug="${esc(m.slug)}">
+      <span class="sym">$${esc(symbol(m))}</span>
+      <span class="num">${pct(m.prices[i])}</span>
+      ${sparkline(series(m, i), { up: (d ?? 0) >= 0 })}
+      <span class="move ${d > 0 ? 'up' : d < 0 ? 'down' : 'flat'}">${arrow}</span>
+    </button>`;
+  }).join('');
+  // Two copies so the marquee loops without a seam.
+  host.innerHTML = `<div class="tape-run">${items}${items}</div>`;
+  $$('.tape-item', host).forEach((b) => {
+    b.onclick = () => {
+      const card = $(`.market[data-slug="${b.dataset.slug}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (card) {
+        animate(card, [{ transform: 'scale(1)' }, { transform: 'scale(1.02)' }, { transform: 'scale(1)' }],
+          { duration: 600, easing: SPRING });
+      }
+    };
+  });
 }
 
 function wireMarketCards(root) {
@@ -146,6 +219,11 @@ function renderMarketsView() {
   const first = !host.children.length;
   host.innerHTML = [...open, ...done].map(marketCard).join('');
   wireMarketCards(host);
+  $$('.runner', host).forEach((r) => {
+    const [slug, i] = r.dataset.lane.split(':');
+    const m = bySlug(slug);
+    if (m) slideTo(r, m.prices[Number(i)]);
+  });
   if (first) stagger($$('.market', host), 40);
 }
 
@@ -202,6 +280,7 @@ function viewMarkets() {
       <div class="row"><button class="primary" id="hero-start">Start with 1,000 HACK</button>
       <button id="hero-phantom">Use Phantom</button></div>
     </section>`}
+    <div class="tape" id="tape" aria-hidden="true"></div>
     <section class="panel">
       <div class="section-head"><h2>Markets</h2><span class="small muted" id="market-count"></span></div>
       <div class="markets" id="markets-list"></div>
@@ -282,6 +361,7 @@ function renderView() {
 
   if (S.view === 'markets') {
     renderMarketsView();
+    renderTape();
     const hs = $('#hero-start');
     if (hs) hs.onclick = (e) => { press(e.currentTarget); connect('burner'); };
     const hp = $('#hero-phantom');
@@ -598,7 +678,7 @@ async function poll() {
   }
   $('#live').classList.toggle('stale', Date.now() - S.lastOk > 15_000);
   renderWallet();
-  if (S.view === 'markets') renderMarketsView();
+  if (S.view === 'markets') { renderMarketsView(); renderTape(); }
   if (S.view === 'you') renderView();
   renderRail();
   const count = $('#market-count');

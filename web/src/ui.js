@@ -73,20 +73,60 @@ export function rollTo(node, to, { digits = 2, ms = 700, prefix = '', suffix = '
   }
 }
 
-/** Draw an SVG path for a price history, animated as if it were being drawn. */
-export function sparkline(values, { w = 120, h = 34, up = true } = {}) {
+/**
+ * The price chart on a market card: an area under a line, a dot on the last
+ * point, and the line drawing itself in on first paint. Padded vertically so
+ * a flat market still reads as a line rather than a wall.
+ */
+export function priceChart(values, { w = 300, h = 84, up = true, id = 'c' } = {}) {
+  if (!values || values.length < 2) {
+    return `<div class="chart empty-chart"><span class="small muted">price history starts as soon as people trade</span></div>`;
+  }
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const pad = Math.max(0.02, (hi - lo) * 0.25);
+  const top = Math.min(1, hi + pad);
+  const bot = Math.max(0, lo - pad);
+  const span = top - bot || 1;
+  const xy = values.map((v, i) => [
+    (i / (values.length - 1)) * w,
+    h - 4 - ((v - bot) / span) * (h - 8),
+  ]);
+  const line = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const area = `${line} L${w} ${h} L0 ${h} Z`;
+  const [lx, ly] = xy.at(-1);
+  return `<svg class="chart ${up ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img"
+      aria-label="price history, now ${Math.round(values.at(-1) * 100)} percent">
+    <path class="area" d="${area}" />
+    <path class="line" d="${line}" pathLength="1" />
+    <circle class="dot" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.2" />
+  </svg>`;
+}
+
+/** Compact sparkline for the ticker tape. */
+export function sparkline(values, { w = 44, h = 16, up = true } = {}) {
   if (!values || values.length < 2) return '';
   const lo = Math.min(...values);
   const hi = Math.max(...values);
   const span = hi - lo || 1;
-  const pts = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * w;
-    const y = h - 3 - ((v - lo) / span) * (h - 6);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
+  const pts = values.map((v, i) =>
+    `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - lo) / span) * (h - 4)).toFixed(1)}`);
   return `<svg class="spark ${up ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
     <polyline points="${pts.join(' ')}" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
+}
+
+/**
+ * Move a racing lane's chip to its new probability. Transform only, so the
+ * browser animates it on the compositor and a re-render can't fight it.
+ */
+export function slideTo(node, fraction) {
+  if (!node) return;
+  const to = `translateX(${(fraction * 100).toFixed(2)}%)`;
+  const from = node.dataset.at ?? to;
+  node.dataset.at = to;
+  node.style.transform = to;
+  if (from !== to) animate(node, [{ transform: from }, { transform: to }], { duration: 900, easing: SPRING });
 }
 
 /** Toasts: slide up with a bit of overshoot, leave quickly. */

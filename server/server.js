@@ -209,15 +209,18 @@ refreshBoard();
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const HISTORY_MAX = 120;              // samples kept per market (~2 h at 60 s)
 let history = {};
-try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { /* first run */ }
+try {
+  history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+  // Older files stored a bare price per sample; start those over.
+  for (const [k, v] of Object.entries(history)) if (typeof v?.[0] !== 'object') delete history[k];
+} catch { /* first run */ }
 
 async function sampleHistory() {
   const markets = await marketStates();
   for (const m of markets) {
     if (m.missing || !m.prices) continue;
     const row = (history[m.slug] ??= []);
-    const p = Math.round(m.prices[0] * 1000) / 1000;
-    if (row.at(-1) !== p || row.length < 2) row.push(p);
+    row.push({ t: Date.now(), p: m.prices.map((x) => Math.round(x * 1000) / 1000) });
     if (row.length > HISTORY_MAX) row.splice(0, row.length - HISTORY_MAX);
   }
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
