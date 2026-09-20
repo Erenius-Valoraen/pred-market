@@ -188,6 +188,13 @@ const badgeBackend = createBadgeBackend({
 });
 let outbox = [];
 const terminal = new Terminal(badgeBackend, (frames) => { outbox.push(...frames); });
+// Everything worth repeating on air: the current screen of every badge that
+// spoke recently, so a row one of them missed arrives eventually.
+function carousel() {
+  const frames = [];
+  for (const s of terminal.activeSessions()) frames.push(...terminal.allFrames(s));
+  return frames;
+}
 const refreshBoard = () => leaderboard().then((rows) => badgeBackend.setBoard(rows))
   .catch((e) => console.error('[badges] leaderboard:', e.message));
 setInterval(refreshBoard, 20_000).unref();
@@ -264,7 +271,7 @@ async function route(req, url, body) {
     if (url.pathname === '/api/admin/badge/outbox' && req.method === 'POST') {
       const frames = outbox;
       outbox = [];
-      return [200, { frames }];
+      return [200, { frames, carousel: carousel() }];
     }
     if (url.pathname === '/api/admin/resolve' && req.method === 'POST') {
       const r = await serialized(() => resolveMarket(op, String(body.slug), Number(body.winner)));

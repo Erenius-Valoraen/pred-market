@@ -7,9 +7,9 @@ So this process:
 
   * scans (bleak / WinRT) for badge frames starting "HMK" -> POSTs them to
     the market server (/api/admin/badge/rx), which answers with screen lines;
-  * advertises those lines as 20-byte frames "M<tag><cell><text>" through
-    Windows' BLE advertisement publisher; badges running HTN Market pick up
-    the ones addressed to them.
+  * advertises 20-byte frames through Windows' BLE advertisement publisher:
+    market names, prices and the leaderboard for every badge at once, plus
+    per-badge balances, holdings and trade results (see src/terminal.js).
 
 Measured on hardware: a badge hears a given advertisement only ~1-3 times a
 second and ignores payloads over 44 bytes. Extended adverts (44 bytes) don't
@@ -37,10 +37,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 COMPANY = 0xFFFF
 PREFIX = b"LUA1"
 SLOTS = 8            # concurrent legacy adverts (measured: ~1.5 receptions/s each, they add up)
-REFRESH_SLOTS = int(__import__("os").environ.get("REFRESH_SLOTS", 2))   # leave the radio time to listen
+REFRESH_SLOTS = int(__import__("os").environ.get("REFRESH_SLOTS", 6))   # rest keep listening for presses
 AIRTIME = 2.4        # seconds a new frame is advertised (~95% chance a nearby badge hears it)
-REFRESH = 1.2        # airtime for background re-sends of a badge's current screen
-ACTIVE_FOR = 180     # keep refreshing a badge's screen this long after it last spoke
+REFRESH = 1.2        # airtime for each carousel frame
 OUTBOX_EVERY = 0.25
 
 
@@ -66,39 +65,45 @@ def publisher(payload: bytes):
     return BluetoothLEAdvertisementPublisher(adv)
 
 
-class Airwaves:
-    """What goes on air. Key = frame[:7] ("M" + tag + cell): newer text wins.
+def key_of(frame):
+    """Frames that supersede each other share a key: same badge+field, or
+    same market+field for the shared ones."""
+    return frame[:3] if frame[0] in "ZNPOL" else frame[:7]
 
-    New frames get AIRTIME in a free slot, newest first, and may bump a slot
-    that is only doing a background refresh. When nothing is new, slots cycle
-    through every active badge's current frames (REFRESH each), so a part a
-    badge missed fills in on its own.
+
+class Airwaves:
+    """What goes on air.
+
+    Anything a badge is waiting for (acks, balances, trade results) is "new"
+    and gets AIRTIME in the next free slot. The rest of the time the slots
+    cycle through the carousel the server hands us -- market names, prices,
+    the leaderboard, and recent badges' balances -- so a badge that missed a
+    frame, or just opened the app, catches up on its own.
     """
 
     def __init__(self):
-        self.new = collections.OrderedDict()     # key -> frame, waiting for first airing
-        self.current = {}                        # key -> latest frame (what the badge should show)
-        self.active = {}                         # tag -> last time that badge spoke
-        self.slots = [None] * SLOTS              # (key, publisher, ends_at, is_refresh)
+        self.new = collections.OrderedDict()     # key -> frame
+        self.carousel = []
         self.cursor = 0
+        self.slots = [None] * SLOTS              # (key, publisher, ends_at, is_refresh)
 
     def add(self, frame):
-        key = frame[:7]
-        self.current[key] = frame
+        key = key_of(frame)
         self.new.pop(key, None)
         self.new[key] = frame
-        self.new.move_to_end(key, last=False)    # newest first
+        self.new.move_to_end(key, last=False)    # newest first: someone is waiting for it
 
-    def heard(self, tag):
-        self.active[tag] = time.monotonic()
+    def set_carousel(self, frames):
+        if frames:
+            self.carousel = frames
 
-    def _refresh_pick(self, busy):
-        now = time.monotonic()
-        keys = [k for k in self.current if now - self.active.get(k[1:6], 0) < ACTIVE_FOR and k not in busy]
-        if not keys:
-            return None
-        self.cursor = (self.cursor + 1) % len(keys)
-        return keys[self.cursor]
+    def _next_carousel(self, busy):
+        for _ in range(len(self.carousel)):
+            self.cursor = (self.cursor + 1) % len(self.carousel)
+            f = self.carousel[self.cursor]
+            if key_of(f) not in busy:
+                return f
+        return None
 
     def tick(self):
         now = time.monotonic()
@@ -113,20 +118,22 @@ class Airwaves:
         for i, s in enumerate(self.slots):
             if s:
                 continue
-            key = next((k for k in self.new if k not in busy), None)
-            refresh = key is None
+            frame = None
+            for key in self.new:
+                if key not in busy:
+                    frame = self.new.pop(key)
+                    break
+            refresh = frame is None
             if refresh:
-                if sum(1 for x in self.slots if x and x[3]) >= REFRESH_SLOTS:
+                if sum(1 for x in self.slots if x and x[3]) >= REFRESH_SLOTS or not self.carousel:
                     continue
-                key = self._refresh_pick(busy)
-                if key is None:
+                frame = self._next_carousel(busy)
+                if frame is None:
                     continue
-            else:
-                del self.new[key]
-            pub = publisher(self.current[key].encode()[:20])
+            pub = publisher(frame.encode()[:20])
             pub.start()
-            self.slots[i] = (key, pub, now + (REFRESH if refresh else AIRTIME), refresh)
-            busy.add(key)
+            self.slots[i] = (key_of(frame), pub, now + (REFRESH if refresh else AIRTIME), refresh)
+            busy.add(key_of(frame))
 
     def stop(self):
         for s in self.slots:
@@ -156,7 +163,6 @@ async def main():
         if last.get(mac) == payload:
             return
         last[mac] = payload
-        air.heard(mac.replace(":", "")[-5:])
         loop.call_soon_threadsafe(inbox.put_nowait, (mac, ad.rssi, payload))
 
     async def uplinks():
@@ -180,6 +186,7 @@ async def main():
                 res = await asyncio.to_thread(post, a.server, token, "/api/admin/badge/outbox", {})
                 for f in reversed(res.get("frames", [])):
                     air.add(f)
+                air.set_carousel(res.get("carousel", []))
             except (urllib.error.URLError, OSError):
                 pass
 

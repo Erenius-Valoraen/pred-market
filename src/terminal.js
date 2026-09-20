@@ -1,26 +1,31 @@
-// Badge terminal: the screens attendees see on their badges.
+// The screens attendees see on their badges, and what their presses do.
 //
-// The badge app is a dumb radio terminal (badge/htnmkt/main.lua): it shows 10
-// lines of text and reports button presses. Everything else happens here, per
-// badge: which screen you're on, the cursor, quotes, and the trades
-// themselves (through an injected backend so this file has no chain code and
-// can be tested offline).
+// The badge (badge/htnmkt/main.lua) is a thin radio terminal: it shows ten
+// rows of text and owns nothing but the cursor, which is why moving it is
+// instant. This file decides what those rows say, and turns "the badge acted
+// on row 4" into a real on-chain trade (through an injected backend, so this
+// file has no chain code and can be tested offline).
 //
-// Wire format (laptop Bluetooth <-> badge, see tools/radio_node.py):
-//   uplink   "HMK" seq try key    key = button number, or "H<name>" on open
-//   downlink "M" tag cell text    <= 20 bytes so it fits a legacy advert
-//     tag  = last 5 hex digits of the badge's radio MAC
-//     cell = char(48 + 3*row + part); each row is sent as 3 parts of up to
-//            13 chars that the badge joins back together
-//     cell "~" = ack of press <seq>: the badge resends a press until acked
+// Row layout, fixed so the badge can skip blank rows when moving:
+//   0      header: what you are looking at, and your balance
+//   1..7   the things you can pick: markets, or one market's outcomes
+//   8      status: what just happened
+//   9      hints: which button does what
+//
+// Wire format (see tools/radio_node.py):
+//   uplink   "HMK" seq try key   key = "A"row "S"row "B" "N" "P" "L" "R"
+//                                or "H"name when the app opens
+//   downlink "M" tag cell text   cell = char(48 + 3*row + part); each row is
+//                                sent as up to 3 parts of 13 chars, so every
+//                                frame fits a 20-byte legacy BLE advert
+//            "M" tag "~" seq     ack: the badge stops resending that press
 
 export const ROWS = 10;
+export const ITEMS = 7;                  // rows 1..7
 export const WIDTH = 34;                 // characters per row on the badge
 export const PART = 13;                  // 20-byte frame - 7 bytes of header
 export const FRAME_MAX = 20;
-export const BTN = { A: 0, B: 1, HOME: 2, DOWN: 3, LEFT: 4, RIGHT: 5, UP: 6, AUX1: 7, START: 8 };
-const AMOUNTS = [10, 25, 50, 100, 250, 500];
-const LIST_ROWS = 7;
+export const AMOUNTS = [10, 25, 50, 100, 250, 500];
 
 export function tagOf(mac) {
   return String(mac).replace(/:/g, '').slice(-5).toUpperCase();
@@ -30,39 +35,47 @@ const fit = (s, n = WIDTH) => {
   s = String(s ?? '').replace(/[^\x20-\x7e]/g, '?');
   return s.length > n ? s.slice(0, n - 1) + '~' : s;
 };
-const pct = (p) => `${Math.round(p * 100)}%`.padStart(4);
+const pct = (p) => `${Math.round(p * 100)}%`;
 const num = (x) => (x >= 100 ? Math.round(x).toLocaleString('en-US') : x.toFixed(1));
 const cols = (left, right, n = WIDTH) => {
   right = String(right);
   return fit(left, n - right.length - 1).padEnd(n - right.length) + right;
 };
 
-/** Short label for a market in the list. */
 function label(m) {
-  if (m.kind === 'team') return m.team?.name ?? m.question;
-  return m.short ?? m.question;
+  return m.kind === 'team' ? (m.team?.name ?? m.question) : (m.short ?? m.question);
 }
 
-/** Headline number for a market in the list: YES price, or the favourite. */
-function headline(m) {
-  if (!m.prices) return '--';
-  if (m.status === 'resolved') return 'done';
-  if (m.outcomes.length === 2 && m.outcomes[0] === 'YES') return pct(m.prices[0]).trim();
-  let best = 0;
-  m.prices.forEach((p, i) => { if (p > m.prices[best]) best = i; });
-  return pct(m.prices[best]).trim();
+function best(m) {
+  if (m.outcomes[0] === 'YES') return 0;
+  let b = 0;
+  m.prices.forEach((p, i) => { if (p > m.prices[b]) b = i; });
+  return b;
+}
+
+/** A bar drawn in text, because badge widgets cost RAM the radio needs. */
+const BAR = 10;
+function bar(p) {
+  const on = Math.max(0, Math.min(BAR, Math.round(p * BAR)));
+  return '='.repeat(on) + '.'.repeat(BAR - on);
+}
+
+/** "Aurora        ====...... 42%" */
+function itemRow(name, p, resolved) {
+  if (p === undefined) return cols(name, '--');
+  const right = `${bar(p)} ${pct(p).padStart(4)}`;
+  return resolved ? cols(name, `resolved ${pct(p)}`) : cols(name, right);
 }
 
 export class Terminal {
   /**
    * backend: {
-   *   markets(): [{slug, question, outcomes, kind, team?, prices, q, b, status}]
-   *   account(mac, name): Promise<{cash, shares: {slug: [n0, n1, ...]}}>
-   *   buy(mac, slug, outcome, spend): Promise<{shares}>
-   *   sell(mac, slug, outcome, shares): Promise<{refund}>
-   *   board(): [{name, netWorth, mac?}]
+   *   markets(), board(),
+   *   account(mac, name) -> {cash, shares, fresh},
+   *   buy(mac, slug, outcome, spend) -> {shares},
+   *   sell(mac, slug, outcome, shares) -> {refund},
    * }
-   * emit(frames): called whenever lines for some badge change (async trades).
+   * emit(frames): rows that changed on their own (a trade confirming).
    */
   constructor(backend, emit) {
     this.backend = backend;
@@ -73,40 +86,60 @@ export class Terminal {
   session(mac) {
     let s = this.sessions.get(mac);
     if (!s) {
-      s = { mac, tag: tagOf(mac), name: '', view: 'list', cursor: 0, mi: 0, oi: 0, amt: 2,
-        status: '', lastSeq: null, sent: new Array(ROWS * 3).fill(null), last: [], busy: false, acct: null };
+      s = { mac, tag: tagOf(mac), name: '', view: 'list', page: 0, mi: 0, amt: 2,
+        status: '', lastSeq: null, sent: new Array(ROWS * 3).fill(null), last: [],
+        busy: false, acct: null, seen: 0 };
       this.sessions.set(mac, s);
     }
+    s.seen = Date.now();
     return s;
   }
 
-  /** Handle one uplink frame. Returns the frames to broadcast, ack first. */
+  /** One uplink frame; returns the frames to broadcast, ack first. */
   async handle(mac, payload) {
     if (!payload.startsWith('HMK') || payload.length < 6) return [];
     const s = this.session(mac);
     const seq = payload[3];
-    return [`M${s.tag}~${seq}`, ...this.respond(s, seq, payload)];
-  }
-
-  respond(s, seq, payload) {
-    const key = payload.slice(5);          // payload[4] is the retry counter
-    // A retry repeats the seq: re-send the current screen (our answer was
-    // evidently lost) but don't act on the press twice.
-    const repeat = seq === s.lastSeq;
+    const key = payload.slice(5);
+    const ack = `M${s.tag}~${seq}`;
+    if (seq === s.lastSeq) return [ack, ...s.last];   // a retry: don't act twice
     s.lastSeq = seq;
-    if (key[0] === 'H') {
-      if (repeat) return s.last;
-      s.name = key.slice(1).trim().slice(0, 32) || s.name;
-      s.sent.fill(null);
-      if (!s.acct) this.loadAccount(s);
-      return this.render(s);
-    }
-    if (repeat) return s.last;          // resend our last answer, don't act twice
-    this.press(s, Number(key));
-    return this.render(s);
+    this.press(s, key);
+    const frames = this.render(s);
+    s.last = frames;
+    return [ack, ...frames];
   }
 
-  /** First contact: create/fund the wallet in the background, then redraw. */
+  press(s, key) {
+    const k = key[0];
+    const row = Number(key[1]);                       // 1..7, the highlighted row
+    const markets = this.backend.markets();
+    if (k === 'H') {
+      s.name = String(key.slice(1)).trim().slice(0, 32) || s.name;
+      s.sent.fill(null);                              // the badge starts blank
+      if (!s.acct) this.loadAccount(s);
+      return;
+    }
+    if (s.view === 'list') {
+      const pages = Math.max(1, Math.ceil(markets.length / ITEMS));
+      if (k === 'N') s.page = Math.min(pages - 1, s.page + 1);
+      else if (k === 'P') s.page = Math.max(0, s.page - 1);
+      else if (k === 'A') {
+        const i = s.page * ITEMS + row - 1;
+        if (markets[i]) { s.view = 'market'; s.mi = i; s.status = ''; }
+      }
+      return;
+    }
+    // inside a market: rows 1..n are its outcomes
+    const m = markets[s.mi];
+    if (!m) { s.view = 'list'; return; }
+    if (k === 'B') { s.view = 'list'; s.status = ''; }
+    else if (k === 'L') s.amt = Math.max(0, s.amt - 1);
+    else if (k === 'R') s.amt = Math.min(AMOUNTS.length - 1, s.amt + 1);
+    else if (k === 'A' || k === 'S') this.trade(s, m, row - 1, k === 'A' ? 'buy' : 'sell');
+  }
+
+  /** First contact: create and fund this badge's wallet, then redraw. */
   loadAccount(s) {
     if (s.loading) return;
     s.loading = true;
@@ -117,44 +150,14 @@ export class Terminal {
         s.status = a.fresh ? `Welcome${s.name ? ' ' + s.name.split(' ')[0] : ''}! +${num(a.cash)} HACK` : '';
       })
       .catch((e) => { s.status = fit(`Wallet error: ${friendly(e)}`); })
-      .then(() => { s.loading = false; this.emit(this.render(s)); });
+      .then(() => { s.loading = false; this.push(s); });
   }
 
-  press(s, b) {
-    const markets = this.backend.markets();
-    if (s.view === 'list') {
-      const n = markets.length;
-      if (b === BTN.DOWN && n) s.cursor = (s.cursor + 1) % n;
-      else if (b === BTN.UP && n) s.cursor = (s.cursor - 1 + n) % n;
-      else if (b === BTN.RIGHT && n) s.cursor = Math.min(n - 1, s.cursor + LIST_ROWS);
-      else if (b === BTN.LEFT) s.cursor = Math.max(0, s.cursor - LIST_ROWS);
-      else if (b === BTN.A && n) { s.view = 'market'; s.mi = s.cursor; s.oi = 0; s.status = ''; }
-      else if (b === BTN.AUX1) s.view = 'board';
-      else if (b === BTN.B) { s.sent.fill(null); s.status = ''; }       // B on the list = redraw
-      return;
-    }
-    if (s.view === 'board') {
-      if (b === BTN.B || b === BTN.AUX1 || b === BTN.A) s.view = 'list';
-      return;
-    }
-    // market view
-    const m = markets[s.mi];
-    if (!m) { s.view = 'list'; return; }
-    const k = m.outcomes.length;
-    if (b === BTN.B) { s.view = 'list'; s.status = ''; }
-    else if (b === BTN.DOWN) s.oi = (s.oi + 1) % k;
-    else if (b === BTN.UP) s.oi = (s.oi - 1 + k) % k;
-    else if (b === BTN.RIGHT) s.amt = Math.min(AMOUNTS.length - 1, s.amt + 1);
-    else if (b === BTN.LEFT) s.amt = Math.max(0, s.amt - 1);
-    else if (b === BTN.A) this.trade(s, m, 'buy');
-    else if (b === BTN.START) this.trade(s, m, 'sell');
-  }
-
-  trade(s, m, side) {
-    if (s.busy) { s.status = 'Still working on the last trade'; return; }
-    if (m.status === 'resolved') { s.status = 'Market is closed'; return; }
-    const outcome = s.oi;
+  trade(s, m, outcome, side) {
     const name = m.outcomes[outcome];
+    if (!name) return;
+    if (s.busy) { s.status = 'Still working on the last trade'; return; }
+    if (m.status === 'resolved') { s.status = 'This market is closed'; return; }
     let job;
     if (side === 'buy') {
       const spend = AMOUNTS[s.amt];
@@ -176,53 +179,48 @@ export class Terminal {
       .then(async () => {
         s.busy = false;
         try { s.acct = await this.backend.account(s.mac, s.name); } catch { /* keep old */ }
-        this.emit(this.render(s));
+        this.push(s);
       });
   }
 
-  /** Lines for this badge's current screen. */
+  push(s) {
+    const frames = this.render(s);
+    if (frames.length) {
+      s.last = frames;
+      this.emit(frames);
+    }
+  }
+
+  /** The ten rows this badge should be showing. */
   lines(s) {
     const markets = this.backend.markets();
     const cash = s.acct ? `${num(s.acct.cash)} HACK` : '...';
     const L = new Array(ROWS).fill('');
     if (s.view === 'list') {
       L[0] = cols('HTN MARKET', cash);
-      if (!markets.length) L[2] = 'No markets yet';
-      const top = Math.floor(s.cursor / LIST_ROWS) * LIST_ROWS;
-      for (let r = 0; r < LIST_ROWS; r++) {
+      const top = s.page * ITEMS;
+      for (let r = 0; r < ITEMS; r++) {
         const m = markets[top + r];
-        if (!m) break;
-        L[1 + r] = cols(`${top + r === s.cursor ? '>' : ' '} ${label(m)}`, headline(m));
+        if (m) L[1 + r] = itemRow(label(m), m.prices?.[best(m)], m.status === 'resolved');
       }
-      L[8] = fit(s.status);
-      L[9] = 'A open  UP/DN move  AUX leaders';
-    } else if (s.view === 'board') {
-      L[0] = cols('LEADERBOARD', cash);
-      const rows = this.backend.board();
-      const mine = rows.findIndex((r) => r.mac === s.mac);
-      rows.slice(0, 7).forEach((r, i) => {
-        L[1 + i] = cols(`${i === mine ? '>' : ' '}${i + 1}. ${r.name}`, num(r.netWorth));
-      });
-      L[8] = mine >= 0 ? `You are #${mine + 1} of ${rows.length}` : 'Trade to get on the board';
-      L[9] = 'B back';
+      L[9] = markets.length > ITEMS
+        ? `A open   page ${s.page + 1}/${Math.ceil(markets.length / ITEMS)}`
+        : 'A open a market';
     } else {
       const m = markets[s.mi];
-      const q = m?.question ?? '';
-      L[0] = fit(q);
-      L[1] = q.length > WIDTH ? fit(q.slice(WIDTH - 1)) : '';
-      const held = s.acct?.shares?.[m?.slug] ?? [];
-      m?.outcomes.slice(0, 5).forEach((o, i) => {
+      L[0] = cols(fit(label(m), 22), cash);
+      const held = s.acct?.shares?.[m.slug] ?? [];
+      m.outcomes.slice(0, ITEMS).forEach((o, i) => {
         const own = held[i] > 0.001 ? ` x${num(held[i])}` : '';
-        L[2 + i] = cols(`${i === s.oi ? '>' : ' '} ${o}${own}`, m.prices ? pct(m.prices[i]).trim() : '--');
+        L[1 + i] = itemRow(`${o}${own}`, m.prices?.[i], m.status === 'resolved');
       });
-      L[7] = cols(`Spend < ${AMOUNTS[s.amt]} >`, cash);
-      L[8] = fit(s.status);
-      L[9] = 'A buy  START sell all  B back';
+      L[9] = `A buy ${AMOUNTS[s.amt]}  START sell  B back`;
     }
+    L[8] = fit(s.status);
     return L.map((x) => fit(x));
   }
 
-  /** Frames for row parts that changed since we last sent them. */
+  /** Frames for the row parts that changed since we last sent them. */
   render(s) {
     const L = this.lines(s);
     const out = [];
@@ -236,14 +234,32 @@ export class Terminal {
         }
       }
     }
-    if (out.length) s.last = out;
     return out;
+  }
+
+  /** Every frame of a badge's current screen, for the background re-send. */
+  allFrames(s) {
+    const L = this.lines(s);
+    const out = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let k = 0; k < 3; k++) {
+        const part = L[r].slice(k * PART, (k + 1) * PART);
+        if (part !== '') out.push(`M${s.tag}${String.fromCharCode(48 + r * 3 + k)}${part}`);
+      }
+    }
+    return out;
+  }
+
+  /** Badges that spoke recently: worth re-sending their screen in the background. */
+  activeSessions(ms = 180_000) {
+    const now = Date.now();
+    return [...this.sessions.values()].filter((s) => now - s.seen < ms);
   }
 }
 
 function friendly(e) {
   const t = String(e?.message ?? e);
-  if (/Slippage|0x4\b|custom program error: 0x4/.test(t)) return 'price moved, try again';
+  if (/Slippage|custom program error: 0x4\b/.test(t)) return 'price moved, try again';
   if (/insufficient|0x1\b/.test(t)) return 'not enough funds';
   if (/NotOpen/.test(t)) return 'market closed';
   return t.slice(0, 24);
