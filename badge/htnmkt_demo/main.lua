@@ -29,20 +29,20 @@ local GREEN, RED, GOLD, SEL = 0x146b3a, 0xb3121f, 0xc8912a, 0xe3dcc9
 local ROW_Y, ROW_H = 34, 34
 local BAR_X, BAR_W = 10, 176              -- the bar ends well before the numbers
 
--- The same questions the live market asks, worded the same way.
+-- The questions this market actually asks, worded as they are on the site.
 local markets = {
-  { sym = 'RDD', name = 'Rubber Duck Debuggers',
-    q = 'Will Rubber Duck Debuggers win a prize?', p = 0.62, hold = 0 },
-  { sym = 'LNC', name = 'Late Night Compilers',
-    q = 'Will Late Night Compilers win a prize?', p = 0.41, hold = 0 },
-  { sym = 'SEG', name = 'Segfault Symphony',
-    q = 'Will Segfault Symphony win a prize?', p = 0.28, hold = 0 },
-  { sym = 'HWF', name = 'Hardware finalist',
-    q = 'Will a hardware project be named a Finalist?', p = 0.55, hold = 0 },
-  { sym = 'BDG', name = 'Badge project wins',
-    q = 'Will a project built on the Hacker Badge win any prize?', p = 0.37, hold = 0 },
-  { sym = 'QNX', name = 'QNX winner on a Pi',
-    q = 'Will the QNX prize winner run on a Raspberry Pi?', p = 0.73, hold = 0 },
+  { sym = 'HWF', name = 'Hardware project wins',
+    q = 'Will a hardware project be named a Finalist?', p = 0.62, hold = 0 },
+  { sym = 'DPC', name = '300+ projects submitted',
+    q = 'Will 300 or more projects be submitted on Devpost?', p = 0.41, hold = 0 },
+  { sym = 'AIB', name = 'Best Overall is an AI build',
+    q = 'Will the Best Overall winner be an AI project?', p = 0.28, hold = 0 },
+  { sym = 'BDG', name = 'Badge hack wins a prize',
+    q = 'Will a project built on the Hacker Badge win any prize?', p = 0.55, hold = 0 },
+  { sym = 'QNX', name = 'QNX winner runs on a Pi',
+    q = 'Will the QNX prize winner run on a Raspberry Pi?', p = 0.37, hold = 0 },
+  { sym = 'SLO', name = 'Solo hacker in the top 5',
+    q = 'Will a solo hacker finish in the top five?', p = 0.19, hold = 0 },
 }
 local SPEND = 50
 local cash = 1000
@@ -65,7 +65,10 @@ for _, m in ipairs(markets) do
 end
 
 local view, cur, flash, nextTick = 'list', 1, 0, 0
+local send = { on = false, step = 0, at = 0 }   -- the tap-to-pay animation
 local rows, mk, sel, stamp, title = {}, {}, nil, nil, nil
+local pay = {}                                   -- widgets for tap-to-pay
+local COINS = 4
 
 -- One points buffer, filled in place. Building a fresh table of 40 pairs on
 -- every redraw ran the badge down to 36 bytes of free heap in a minute.
@@ -108,6 +111,16 @@ local function showList(on)
   end
 end
 
+local function showPay(on)
+  pay.panel:hidden(not on)
+  pay.title:hidden(not on)
+  pay.msg:hidden(not on)
+  pay.me:hidden(not on)
+  pay.you:hidden(not on)
+  pay.amount:hidden(not on)
+  for i = 1, COINS do pay[i]:hidden(true) end
+end
+
 local function showMarket(on)
   for k, w in pairs(mk) do
     if k ~= 'cash' and k ~= 'hint' then w:hidden(not on) end
@@ -116,9 +129,11 @@ end
 
 function redraw()
   mk.cash:set_text(money(cash) .. ' HACK')
+  if send.on then return end
   if view == 'list' then
     showMarket(false)
     showList(true)
+    showPay(false)
     title:hidden(false)
     sel:set_pos(4, ROW_Y + (cur - 1) * ROW_H - 4)
     for i, m in ipairs(markets) do
@@ -129,10 +144,11 @@ function redraw()
       r.pct:set_text(pctText(m.p))
       r.hold:set_text(m.hold > 0 and (money(m.hold) .. ' sh') or '')
     end
-    mk.hint:set_text('A open   UP/DOWN move')
+    mk.hint:set_text('A open   START tap-to-pay   UP/DOWN move')
   else
     showList(false)
     showMarket(true)
+    showPay(false)
     title:hidden(true)            -- the symbol takes the header instead
     local m = markets[cur]
     mk.sym:set_text('$' .. m.sym)
@@ -200,10 +216,23 @@ function on_enter(root)
   mk.pos = label(root, '', 12, 206, INK, 'small')
   mk.hint = label(root, '', 10, H - 20, DIM, 'small')
 
+  -- Tap to pay, built once and hidden: a panel, two badges, coins between.
+  pay.panel = box(root, 16, 52, W - 32, 136, 0xf7f3e8)
+  pay.panel:set_border(INK, 2)
+  pay.title = label(root, 'TAP TO PAY', 34, 64, INK)
+  pay.msg = label(root, '', 34, 92, DIM, 'small')
+  pay.me = box(root, 36, 120, 44, 30, INK)
+  pay.you = box(root, W - 84, 120, 44, 30, 0xb9b1a0)
+  pay.amount = label(root, '', 34, 158, GREEN, 'small')
+  for i = 1, COINS do
+    pay[i] = box(root, 0, 0, 10, 10, GOLD)
+  end
+
   stamp = label(root, '', 0, 0, GREEN)
   stamp:set_font_size('large')
   stamp:align('center', 0, -6)
   stamp:hidden(true)
+  showPay(false)
 
   redraw()
 end
@@ -217,6 +246,69 @@ local function showStamp(text, good)
   led.set_all(good and 0 or 90, good and 80 or 0, 0)
   led.show()
   flash = ms() + 900
+end
+
+-- Tap to pay, as a little film: find the badge, coins hop across, it lands.
+-- The radio build does this for real over Bluetooth; here it is staged so it
+-- cannot fail in front of anyone.
+local function startSend()
+  if cash < SPEND then showStamp('NO FUNDS', false) return end
+  send.on, send.step, send.at = true, 1, ms()
+  showList(false)
+  showMarket(false)
+  title:hidden(true)
+  stamp:hidden(true)
+  showPay(true)
+  pay.msg:set_text('looking for a badge nearby...')
+  pay.amount:set_text('')
+  led.set_all(40, 30, 0)
+  led.show()
+end
+
+local function stepSend()
+  local t = ms() - send.at
+  if send.step == 1 and t > 1100 then
+    send.step, send.at = 2, ms()
+    pay.msg:set_text('found: badge E8:F6 - sending ' .. SPEND .. ' HACK')
+    led.set_all(70, 55, 0)
+    led.show()
+  elseif send.step == 2 then
+    -- coins hop from our badge to theirs, staggered
+    local span = W - 84 - 36
+    local done = true
+    for i = 1, COINS do
+      local k = (t - (i - 1) * 260) / 900
+      if k < 0 then
+        pay[i]:hidden(true)
+        done = false
+      elseif k < 1 then
+        done = false
+        pay[i]:hidden(false)
+        local x = 44 + floor(span * k)
+        local hop = floor(26 * (k - k * k) * 4)     -- a low arc
+        pay[i]:set_pos(x, 128 - hop)
+      else
+        pay[i]:hidden(true)
+      end
+    end
+    if done and t > 1500 then
+      send.step, send.at = 3, ms()
+      pay.you:set_color(GREEN)
+      pay.msg:set_text('delivered')
+      pay.amount:set_text('-' .. SPEND .. ' HACK   ->   their badge')
+      cash = cash - SPEND
+      mk.cash:set_text(money(cash) .. ' HACK')
+      showStamp('SENT', true)
+    end
+  elseif send.step == 3 and t > 2200 then
+    send.on, send.step = false, 0
+    pay.you:set_color(0xb9b1a0)
+    showPay(false)
+    stamp:hidden(true)
+    led.clear()
+    led.show()
+    redraw()
+  end
 end
 
 local function push(m, p)
@@ -245,6 +337,7 @@ end
 function on_tick()
   collectgarbage('step', 2)
   local now = ms()
+  if send.on then stepSend() return end
   if flash > 0 and now >= flash then
     flash = 0
     stamp:hidden(true)
@@ -261,7 +354,7 @@ function on_tick()
 end
 
 function on_button(b, kind)
-  if kind ~= input.KIND.PRESSED then return end
+  if kind ~= input.KIND.PRESSED or send.on then return end
   local B = input.BUTTON
   local n = #markets
   if b == B.UP then cur = cur > 1 and cur - 1 or n
@@ -270,7 +363,7 @@ function on_button(b, kind)
     if view == 'list' then view = 'market' else trade(true) return end
   elseif b == B.B then view = 'list'
   elseif b == B.START then
-    if view == 'market' then trade(false) end
+    if view == 'market' then trade(false) else startSend() end
     return
   end
   redraw()
