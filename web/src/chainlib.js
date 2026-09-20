@@ -39,39 +39,26 @@ export async function withRetry(fn, tries = 6) {
   }
 }
 
-/** Decode every market account in one RPC call. */
-export async function fetchMarkets(meta) {
-  const infos = await withRetry(() =>
-    connection.getMultipleAccountsInfo(meta.map((m) => new PublicKey(m.address))));
-  return meta.map((m, i) => {
-    const d = infos[i]?.data;
-    if (!d) return { ...m, missing: true };
-    const n = d[3];
-    const q = [];
-    for (let k = 0; k < n; k++) q.push(Number(d.readBigUInt64LE(88 + 8 * k)) / UNIT);
-    const b = Number(d.readBigUInt64LE(80)) / UNIT;
-    return {
-      ...m, pubkey: new PublicKey(m.address), q, b,
-      status: d[4] === 0 ? 'open' : 'resolved', winner: d[5],
-      prices: lmsr.prices(q, b),
-    };
-  });
+/**
+ * Prices and balances come from OUR server, not from Solana directly: at a
+ * hackathon every phone hitting the public devnet RPC gets everyone rate
+ * limited. The server reads the same accounts once and caches them. The only
+ * thing the browser still sends to the chain is its own signed transaction.
+ */
+export async function fetchMarkets() {
+  const rows = await (await fetch('/api/state')).json();
+  return rows.map((m) => ({ ...m, pubkey: m.missing ? null : new PublicKey(m.address) }));
 }
 
-/** All token balances for a wallet in one call: mint(base58) -> amount. */
+/** All token balances for a wallet: mint(base58) -> amount. */
 export async function fetchBalances(owner) {
-  const res = await withRetry(() =>
-    connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }));
-  const out = new Map();
-  for (const a of res.value) {
-    const t = a.account.data.parsed.info;
-    out.set(t.mint, (out.get(t.mint) ?? 0) + Number(t.tokenAmount.amount) / UNIT);
-  }
-  return out;
+  const { mints } = await (await fetch(`/api/wallet/${owner.toBase58()}`)).json();
+  return new Map(Object.entries(mints ?? {}));
 }
 
 export async function solBalance(owner) {
-  return (await withRetry(() => connection.getBalance(owner))) / 1e9;
+  const { sol } = await (await fetch(`/api/wallet/${owner.toBase58()}`)).json();
+  return sol ?? 0;
 }
 
 // ------------------------------------------------------------------- quotes

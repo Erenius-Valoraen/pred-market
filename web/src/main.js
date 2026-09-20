@@ -20,6 +20,7 @@ import {
 const S = {
   view: 'markets',
   filter: 'all',
+  detail: null,               // slug of the market being read in full
   meta: [], markets: [], history: {}, board: [],
   wallet: null, balances: new Map(), sol: 0, hack: 0,
   sheet: null, busy: false, lastOk: 0, activity: [],
@@ -157,7 +158,10 @@ function marketCard(m) {
       <span class="slip-no">NO. ${slipNo(m)}</span>
     </div>
     ${resolved ? `<span class="stamp">${esc(m.outcomes[m.winner])} \u00b7 settled</span>` : ''}
-    <h3>${esc(m.question)}</h3>
+    <button class="open-head" data-open="${esc(m.slug)}">
+      <h3>${esc(m.question)}</h3>
+      <span class="open-hint">Open market &rarr;</span>
+    </button>
     <div class="quote-line">
       <div>
         <div class="label">${isBinary(m) ? 'Chance' : esc(m.outcomes[shown])}</div>
@@ -209,8 +213,11 @@ function renderTape() {
 }
 
 function wireMarketCards(root) {
-  $$('.side:not([disabled]), .outcome-row:not([disabled])', root).forEach((b) => {
+  $$('.side:not([disabled]), .lane:not([disabled])', root).forEach((b) => {
     b.onclick = (e) => { press(b); openSheet(b.dataset.slug, Number(b.dataset.i), e); };
+  });
+  $$('[data-open]', root).forEach((b) => {
+    b.onclick = () => openMarket(b.dataset.open);
   });
   $$('[data-redeem]', root).forEach((b) => { b.onclick = () => { press(b); redeem(b.dataset.redeem); }; });
 }
@@ -378,6 +385,97 @@ function renderTrending() {
   });
 }
 
+/** Everything about one market, on its own page. */
+function viewDetail() {
+  const m = bySlug(S.detail);
+  if (!m || m.missing) return '<section class="card pad panel"><p>That market is not open yet.</p></section>';
+  const resolved = m.status === 'resolved';
+  const lead = m.prices.indexOf(Math.max(...m.prices));
+  const shown = isBinary(m) ? 0 : lead;
+  const delta = movement(m, shown);
+  const hist = series(m, shown);
+  const samples = (S.history[m.slug] ?? []).length;
+  const team = m.team;
+  const mine = m.outcomes.map((o, i) => ({ o, i, h: held(m, i) })).filter((x) => x.h > 0.001);
+  const mineValue = mine.reduce((a, x) => a + (resolved ? (x.i === m.winner ? x.h : 0) : x.h * m.prices[x.i]), 0);
+
+  return `
+    <button class="back" id="back">&larr; All markets</button>
+    <section class="card market detail">
+      <div class="ticker-head">
+        <span class="sym">$${esc(symbol(m))}</span>
+        ${team ? '<span class="tag team">Team</span>' : '<span class="tag">Event</span>'}
+        <span class="spacer"></span>
+        <span class="slip-no">NO. ${slipNo(m)}</span>
+      </div>
+      ${resolved ? `<span class="stamp">${esc(m.outcomes[m.winner])} \u00b7 settled</span>` : ''}
+      <h1>${esc(m.question)}</h1>
+      <div class="quote-line">
+        <div>
+          <div class="label">${isBinary(m) ? 'Chance' : esc(m.outcomes[shown])}</div>
+          <div class="big num">${pct(m.prices[shown])}</div>
+        </div>
+        ${moveBadge(delta)}
+        <span class="spacer"></span>
+        <span class="stake-line">
+          <span class="odds num">pays ${payout(m.prices[shown])}</span>
+          <span class="small muted">${fmt(stakes(m), 0)} shares</span>
+        </span>
+      </div>
+      ${priceChart(hist, { up: (delta ?? 0) >= 0, h: 170 })}
+      <p class="small muted chart-foot">${samples > 1
+        ? `${samples} price samples \u00b7 one a minute since this page has been watching`
+        : 'price history starts as soon as people trade'}</p>
+      <div class="detail-trade">
+        ${m.outcomes.map((o, i) => {
+          const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (isBinary(m) ? (i === 0 ? 'yes' : 'no') : '');
+          const h = held(m, i);
+          return `<button class="side ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
+            <span class="name">${esc(o)}</span>
+            <span class="price num">${pct1(m.prices[i])}</span>
+            <span class="odds num">pays ${payout(m.prices[i])}</span>
+            ${h > 0 ? `<span class="held">you hold ${fmt(h, 2)}</span>` : ''}
+          </button>`;
+        }).join('')}
+      </div>
+      ${resolved && held(m, m.winner) > 0
+        ? `<button class="primary" data-redeem="${esc(m.slug)}">Collect ${fmt(held(m, m.winner), 2)} HACK</button>` : ''}
+    </section>
+
+    <section class="card pad panel">
+      <div class="section-head"><h2>Your position</h2></div>
+      ${S.wallet ? (mine.length
+        ? `${mine.map((x) => `<div class="kv"><span>${esc(x.o)}</span><b class="num">${fmt(x.h, 2)} shares</b></div>`).join('')}
+           <div class="kv"><span>Worth now</span><b class="num">${fmt(mineValue)} HACK</b></div>`
+        : '<p class="muted small" style="margin:0">Nothing yet. Pick a side above.</p>')
+      : '<p class="muted small" style="margin:0">Start trading to take a position.</p>'}
+    </section>
+
+    <section class="card pad panel">
+      <div class="section-head"><h2>How this settles</h2></div>
+      <p style="margin:0">${esc(m.resolves || 'An organizer resolves this market once the result is known.')}</p>
+      ${team ? `<div class="kv"><span>Team</span><b>${esc(team.name)}</b></div>
+        ${team.project ? `<div class="kv"><span>Project</span><b>${esc(team.project)}</b></div>` : ''}
+        ${team.table ? `<div class="kv"><span>Table</span><b>${esc(team.table)}</b></div>` : ''}
+        ${team.members?.length ? `<div class="kv"><span>Members</span><b>${team.members.map((x) => esc(x.name)).join(', ')}</b></div>` : ''}`
+        : ''}
+    </section>
+
+    <section class="card pad panel">
+      <div class="section-head"><h2>On chain</h2><span class="small muted">nothing here is ours to edit</span></div>
+      <div class="kv"><span>Market account</span>
+        <a class="num small" href="${chain.explorer('address', m.address)}" target="_blank" rel="noopener">${esc(short(m.address))}</a></div>
+      ${m.createSig ? `<div class="kv"><span>Opened by</span>
+        <a class="num small" href="${chain.explorer('tx', m.createSig)}" target="_blank" rel="noopener">${esc(short(m.createSig))}</a></div>` : ''}
+      ${m.commitment ? `<div class="kv"><span>Question hash</span><b class="num small">${esc(m.commitment.slice(0, 16))}\u2026</b></div>` : ''}
+      <div class="kv"><span>Liquidity (b)</span><b class="num">${fmt(m.b, 1)}</b></div>
+      <div class="kv"><span>Shares outstanding</span><b class="num">${m.q.map((x) => fmt(x, 1)).join(' / ')}</b></div>
+      <p class="small muted" style="margin:0">The question and its outcomes were hashed into the transaction that
+      opened this market, so the wording you are betting on cannot be changed afterwards. Prices come from the
+      program's own formula, and only an organizer's key can declare the result \u2014 once.</p>
+    </section>`;
+}
+
 function viewLeaders() {
   return `<section class="card pad panel">
     <div class="section-head"><h2>Leaderboard</h2><span class="small muted">cash + positions, priced live</span></div>
@@ -443,12 +541,18 @@ function viewRegister() {
 
 function renderView() {
   const host = $('#view');
-  const html = { markets: viewMarkets, leaders: viewLeaders, register: viewRegister, you: viewYou }[S.view]();
+  const html = { markets: viewMarkets, leaders: viewLeaders, register: viewRegister,
+    you: viewYou, detail: viewDetail }[S.view]();
   host.innerHTML = html;
   lastKey.markets = null;
   lastKey.rail = null;
   $('#main').classList.toggle('with-rail', S.view === 'markets');
   $('#rail').hidden = S.view !== 'markets';
+  if (S.view === 'detail') {
+    wireMarketCards(host);
+    const back = $('#back');
+    if (back) back.onclick = () => { press(back); openMarket(null); };
+  }
 
   if (S.view === 'markets') {
     renderMarketsView();
@@ -480,8 +584,22 @@ function renderView() {
   renderRail();
 }
 
+/** Open (or close, with null) a market's own page. Deep-linked, so a slip
+ *  can be shared or scanned straight from a badge table. */
+function openMarket(slug) {
+  S.detail = slug;
+  S.view = slug ? 'detail' : 'markets';
+  const hash = slug ? `#m/${slug}` : '#markets';
+  if (location.hash !== hash) history.pushState({ slug }, '', hash);
+  $$('[role="tab"]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === 'markets' && !slug)));
+  moveIndicator($('#tab-indicator'), $('#tabs [data-view="markets"]'));
+  renderView();
+  scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function setView(view) {
   if (S.view === view) return;
+  S.detail = null;
   S.view = view;
   $$('[role="tab"]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === view)));
   moveIndicator($('#tab-indicator'), $(`#tabs [data-view="${view}"]`));
@@ -763,7 +881,11 @@ function loadActivity() {
 // --------------------------------------------------------------- polling
 async function poll() {
   try {
-    S.markets = await chain.fetchMarkets(S.meta);
+    // Prices first and draw them: the balance call must never hold the
+    // market list hostage.
+    S.markets = await chain.fetchMarkets();
+    S.lastOk = Date.now();
+    draw();
     if (S.wallet) {
       const [bal, sol] = await Promise.all([
         chain.fetchBalances(S.wallet.publicKey),
@@ -773,17 +895,21 @@ async function poll() {
       S.sol = sol;
       S.hack = bal.get(chain.HACK.toBase58()) ?? 0;
     }
-    S.lastOk = Date.now();
   } catch (e) {
     if (Date.now() - S.lastOk > 20_000) toast(`Solana is slow to answer (${chain.explainError(e)})`, 'err');
   }
-  $('#live').classList.toggle('stale', Date.now() - S.lastOk > 15_000);
+  draw();
+}
+
+/** Paint whatever we currently know. */
+function draw() {
+  $('#live').classList.toggle('stale', Date.now() - S.lastOk > 20_000);
   renderWallet();
   if (S.view === 'markets') { renderMarketsView(); renderTape(); renderTrending(); renderStats(); }
-  if (S.view === 'you') renderView();
+  if (S.view === 'you' || S.view === 'detail') renderView();
   renderRail();
   const count = $('#market-count');
-  if (count) count.textContent = `${S.markets.filter((m) => !m.missing).length} open · prices from the chain`;
+  if (count) count.textContent = `${S.markets.filter((m) => !m.missing).length} open · priced on-chain`;
   if (S.sheet) updateQuote();
 }
 
@@ -815,9 +941,17 @@ $$('[role="tab"]').forEach((b) => {
   b.onclick = () => { press(b); setView(b.dataset.view); };
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+addEventListener('popstate', () => {
+  const m = location.hash.match(/^#m\/(.+)$/);
+  S.detail = m ? decodeURIComponent(m[1]) : null;
+  S.view = S.detail ? 'detail' : 'markets';
+  renderView();
+});
 window.addEventListener('resize', () => moveIndicator($('#tab-indicator'), $(`#tabs [data-view="${S.view}"]`)));
 
 (async function boot() {
+  const deep = location.hash.match(/^#m\/(.+)$/);
+  if (deep) { S.detail = decodeURIComponent(deep[1]); S.view = 'detail'; }
   renderView();
   moveIndicator($('#tab-indicator'), $('#tabs [data-view="markets"]'));
   try {
@@ -840,6 +974,6 @@ window.addEventListener('resize', () => moveIndicator($('#tab-indicator'), $(`#t
   pollBoard();
   // Devnet's public RPC rate-limits the heavy calls, so poll gently: the
   // market moves when someone trades, and a trade refreshes immediately.
-  setInterval(poll, 11_000);
-  setInterval(pollBoard, 45_000);
+  setInterval(poll, 6000);
+  setInterval(pollBoard, 30_000);
 })();

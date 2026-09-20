@@ -128,7 +128,18 @@ function cleanName(s) {
 }
 
 // ------------------------------------------------------------ chain reads
-async function marketStates() {
+// One cache for everything that reads market accounts: the web feed, the
+// badges, the leaderboard and the history sampler. Devnet's public RPC
+// rate-limits hard, and a room full of traders must not multiply that.
+let statesCache = { at: 0, rows: [] };
+async function marketStates(maxAge = 8000) {
+  if (Date.now() - statesCache.at < maxAge) return statesCache.rows;
+  const rows = await readMarketStates();
+  statesCache = { at: Date.now(), rows };
+  return rows;
+}
+
+async function readMarketStates() {
   // `hidden` markets (the ones created while testing) stay on-chain but are
   // not offered to traders on the web page or the badges.
   const list = loadMarkets().filter((m) => !m.hidden);
@@ -201,6 +212,37 @@ const refreshBoard = () => leaderboard().then((rows) => badgeBackend.setBoard(ro
   .catch((e) => console.error('[badges] leaderboard:', e.message));
 setInterval(refreshBoard, 60_000).unref();
 refreshBoard();
+
+// --------------------------------------------------------- browser feed
+// The page used to read Solana directly from every phone. Now it reads this,
+// and only signs and sends its own transactions over RPC.
+const walletCache = new Map();          // pubkey -> {at, body}
+
+async function walletState(pubkeyStr) {
+  const hit = walletCache.get(pubkeyStr);
+  if (hit && Date.now() - hit.at < 6000) return hit.body;
+  const owner = new PublicKey(pubkeyStr);
+  try {
+    // Two quick tries, not seven slow ones: a page waiting on a throttled
+    // RPC renders nothing, and a slightly stale balance is far better than
+    // a blank screen.
+    const [accounts, lamports] = await Promise.all([
+      withRetry(() => connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }), 2),
+      withRetry(() => connection.getBalance(owner), 2),
+    ]);
+    const mints = {};
+    for (const a of accounts.value) {
+      const t = a.account.data.parsed.info;
+      mints[t.mint] = (mints[t.mint] ?? 0) + Number(t.tokenAmount.amount) / UNIT;
+    }
+    const body = { mints, sol: lamports / 1e9 };
+    walletCache.set(pubkeyStr, { at: Date.now(), body });
+    return body;
+  } catch (e) {
+    if (hit) return { ...hit.body, stale: true };
+    return { mints: {}, sol: 0, stale: true };
+  }
+}
 
 // ------------------------------------------------------- price history
 // A few hours of prices per market, sampled from the same chain reads the
@@ -295,6 +337,20 @@ async function route(req, url, body) {
   }
   if (url.pathname === '/api/markets') return [200, loadMarkets().filter((m) => !m.hidden)];
   if (url.pathname === '/api/history') return [200, history];
+  if (url.pathname === '/api/state') {
+    const rows = await marketStates();
+    return [200, rows.map((m) => ({
+      slug: m.slug, address: m.address, question: m.question, outcomes: m.outcomes,
+      short: m.short, kind: m.kind, team: m.team, resolves: m.resolves,
+      createSig: m.createSig, commitment: m.commitment,
+      q: m.q, b: m.b, prices: m.prices, status: m.status, winner: m.winner, missing: !!m.missing,
+    }))];
+  }
+  if (url.pathname.startsWith('/api/wallet/')) {
+    const key = decodeURIComponent(url.pathname.slice('/api/wallet/'.length));
+    try { new PublicKey(key); } catch { return [400, { error: 'bad wallet' }]; }
+    return [200, await walletState(key)];
+  }
   if (url.pathname === '/api/register' && req.method === 'POST') return handleRegister(req, body);
   if (url.pathname === '/api/leaderboard') return [200, await leaderboard()];
   if (url.pathname === '/api/faucet' && req.method === 'POST') return handleFaucet(req, body);

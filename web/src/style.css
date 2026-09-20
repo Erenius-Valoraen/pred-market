@@ -336,6 +336,53 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
 .filters { display: flex; gap: var(--s1); flex-wrap: wrap; }
 .filters button.on { background: var(--ink); color: var(--paper); }
 
+/* ------------------------------------------------------------- one market */
+.back {
+  justify-self: start;
+  box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+  padding-left: 0;
+}
+.back:hover { background: transparent; text-decoration: underline; }
+.back:active { transform: translateX(-3px); box-shadow: none; }
+
+.open-head {
+  display: grid;
+  gap: var(--s1);
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.open-head:hover { background: none; }
+.open-head:active { transform: none; box-shadow: none; }
+.open-head:hover h3 { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.open-hint {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity .2s var(--ease), transform .2s var(--spring);
+}
+.market:hover .open-hint { opacity: 1; transform: none; }
+
+.detail { padding: var(--s4); gap: var(--s3); }
+.detail h1 { font-size: clamp(26px, 4.4vw, 40px); }
+.detail .chart, .detail .empty-chart { height: 170px; }
+.detail .chart-foot { margin: -6px 0 0; }
+.detail-trade { display: grid; gap: var(--s2); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.detail .side .price { font-size: 26px; }
+
 /* -------------------------------------------------------------- the slips */
 .markets { display: grid; gap: var(--s4); align-items: start; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
 
