@@ -115,13 +115,7 @@ header.top {
 .brand .mark {
   width: 28px;
   height: 28px;
-  border-radius: 4px;
-  background: var(--ink);
-  color: var(--paper);
-  display: grid;
-  place-items: center;
-  font-family: 'Space Mono', monospace;
-  font-size: 11px;
+  display: block;
   transform: rotate(-3deg);
   transition: transform .4s var(--spring);
 }

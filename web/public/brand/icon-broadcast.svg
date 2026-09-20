@@ -1,15 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HTN Market">
-  <title>Badge with a rising price</title>
-  <!-- The badge body: a hackathon badge, ink on paper, hard edges only. -->
-  <rect x="6" y="3" width="52" height="58" rx="7" fill="#14110e"/>
-  <!-- Lanyard slot: the one detail that says "worn round a neck". -->
-  <rect x="25" y="8" width="14" height="3.5" rx="1.75" fill="#837a6c"/>
-  <!-- The screen. -->
-  <rect x="12" y="16" width="40" height="34" rx="2" fill="#efe9db"/>
-  <!-- Solana's three slanted bars, stepped upward so they read as a market
-       climbing. The top bar breaks out over the bezel: the price is leaving
-       the screen, which is the whole point of a badge that broadcasts. -->
-  <path d="M20 40 L37 40 L32 46 L15 46 Z" fill="#14110e"/>
-  <path d="M25 31 L42 31 L37 37 L20 37 Z" fill="#146b3a"/>
-  <path d="M30 22 L55 22 L50 28 L25 28 Z" fill="#c8912a"/>
+  <title>A badge broadcasting a price</title>
+  <!-- A hackathon badge: ink body, paper screen, hard edges, no gradients.
+       The bezel is kept thin so the artwork still reads at favicon size. -->
+  <rect x="5" y="2" width="54" height="60" rx="8" fill="#14110e"/>
+  <rect x="25" y="6.5" width="14" height="3" rx="1.5" fill="#837a6c"/>
+  <rect x="9" y="13" width="46" height="41" rx="3" fill="#efe9db"/>
+  <!-- Solana's three slanted bars, stepped upward so the same shape reads as
+       a market climbing. The gold one breaks out over the bezel: the price is
+       leaving the screen, which is what a badge that trades actually does. -->
+  <path d="M17 42 L36 42 L30 50 L11 50 Z" fill="#14110e"/>
+  <path d="M23 31 L42 31 L36 39 L17 39 Z" fill="#146b3a"/>
+  <path d="M29 20 L58 20 L52 28 L23 28 Z" fill="#c8912a"/>
 </svg>

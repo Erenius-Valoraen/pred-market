@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HTN Market">
+  <title>A badge broadcasting a price, for ink backgrounds</title>
+  <!-- Same mark for dark ground: the body becomes paper so the silhouette
+       survives, and the screen goes ink so the bars keep their contrast. -->
+  <rect x="5" y="2" width="54" height="60" rx="8" fill="#efe9db"/>
+  <rect x="25" y="6.5" width="14" height="3" rx="1.5" fill="#837a6c"/>
+  <rect x="9" y="13" width="46" height="41" rx="3" fill="#14110e"/>
+  <path d="M17 42 L36 42 L30 50 L11 50 Z" fill="#efe9db"/>
+  <path d="M23 31 L42 31 L36 39 L17 39 Z" fill="#2e9c5e"/>
+  <path d="M29 20 L58 20 L52 28 L23 28 Z" fill="#c8912a"/>
+</svg>

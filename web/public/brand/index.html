@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>HTN Market — icon concepts</title>
+<style>
+ @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap');
+ *{box-sizing:border-box}
+ body{background:#efe9db;color:#14110e;font-family:'Space Mono',monospace;margin:0;padding:20px;width:700px}
+ h1{font-family:'Archivo Black',sans-serif;font-size:15px;margin:0 0 4px}
+ p.sub{font-size:11px;color:#837a6c;margin:0 0 18px}
+ .card{background:#fbf8f1;border:2px solid #14110e;border-radius:6px;box-shadow:4px 4px 0 #14110e;
+       padding:14px 16px;margin-bottom:16px}
+ .top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+ .name{font-family:'Archivo Black',sans-serif;font-size:14px}
+ .note{font-size:10px;color:#837a6c}
+ .sizes{display:flex;align-items:flex-end;gap:18px}
+ .s{display:grid;gap:5px;justify-items:center;font-size:9px;color:#837a6c}
+ .ondark{background:#14110e;padding:7px;border-radius:5px}
+ .mark{display:flex;align-items:center;gap:8px;font-family:'Archivo Black',sans-serif;font-size:19px}
+ img{display:block}
+</style>
+<h1>ICON CONCEPTS</h1>
+<p class="sub">shown at 80 / 40 / 24 / 16 px, reversed on ink, and locked up as a header</p>
+<div id="out"></div>
+<script>
+const items = [
+ ['icon-broadcast.svg','BROADCAST','the badge, its screen, and Solana&rsquo;s bars stepping up and out'],
+ ['icon-candle.svg','CANDLE','Solana&rsquo;s three bars, the middle one wearing a candlestick&rsquo;s wicks'],
+ ['icon-tap.svg','TAP','two badges mid-tap, value jumping the gap'],
+];
+document.getElementById('out').innerHTML = items.map(([f,n,note]) => `
+ <div class="card">
+  <div class="top"><span class="name">${n}</span><span class="note">${note}</span></div>
+  <div class="sizes">
+   ${[80,40,24,16].map(s=>`<div class="s"><img src="${f}" width="${s}" height="${s}"><span>${s}px</span></div>`).join('')}
+   <div class="s"><div class="ondark"><img src="${f.replace('.svg','-reversed.svg')}" width="34" height="34"
+        onerror="this.src='${f}'"></div><span>on ink</span></div>
+   <div class="s"><div class="mark"><img src="${f}" width="30" height="30">HACK THE ODDS</div><span>lockup</span></div>
+  </div>
+ </div>`).join('');
+</script>
