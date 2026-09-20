@@ -14,6 +14,7 @@
 //
 // Wire format (see tools/radio_node.py):
 //   uplink   "HMK" seq try key   key = "A"row "S"row "B" "N" "P" "L" "R"
+//                                or "G"tag to hand HACK to a touching badge
 //                                or "H"name when the app opens
 //   downlink "M" tag cell text   cell = char(48 + 3*row + part); each row is
 //                                sent as up to 3 parts of 13 chars, so every
@@ -26,6 +27,7 @@ export const WIDTH = 34;                 // characters per row on the badge
 export const PART = 13;                  // 20-byte frame - 7 bytes of header
 export const FRAME_MAX = 20;
 export const AMOUNTS = [10, 25, 50, 100, 250, 500];
+export const CONFIRM_MS = 15_000;     // how long a tap-to-pay offer stands
 
 export function tagOf(mac) {
   return String(mac).replace(/:/g, '').slice(-5).toUpperCase();
@@ -74,6 +76,7 @@ export class Terminal {
    *   account(mac, name) -> {cash, shares, fresh},
    *   buy(mac, slug, outcome, spend) -> {shares},
    *   sell(mac, slug, outcome, shares) -> {refund},
+   *   transfer(fromMac, toMac, amount),
    * }
    * emit(frames): rows that changed on their own (a trade confirming).
    */
@@ -120,6 +123,7 @@ export class Terminal {
       if (!s.acct) this.loadAccount(s);
       return;
     }
+    if (k === 'G') return this.give(s, key.slice(1));
     if (s.view === 'list') {
       const pages = Math.max(1, Math.ceil(markets.length / ITEMS));
       if (k === 'N') s.page = Math.min(pages - 1, s.page + 1);
@@ -137,6 +141,41 @@ export class Terminal {
     else if (k === 'L') s.amt = Math.max(0, s.amt - 1);
     else if (k === 'R') s.amt = Math.min(AMOUNTS.length - 1, s.amt + 1);
     else if (k === 'A' || k === 'S') this.trade(s, m, row - 1, k === 'A' ? 'buy' : 'sell');
+  }
+
+  /** Tap to pay: hand the current trade size to the badge we are touching.
+   *
+   * Two taps, because "touching" is really just a strong signal and money
+   * should not move because someone walked past. The first tap names who
+   * would get it; a second tap within CONFIRM_MS sends. */
+  give(s, tag) {
+    const to = [...this.sessions.values()].find((x) => x.tag === tag && x !== s);
+    if (!to) { s.status = 'That badge has not opened the app'; return; }
+    if (s.busy) { s.status = 'Still working on the last trade'; return; }
+    const amount = AMOUNTS[s.amt];
+    if ((s.acct?.cash ?? 0) < amount) { s.status = `Not enough HACK for ${amount}`; return; }
+    const who = (x) => (x.name ? x.name.split(' ')[0] : 'that badge');
+    if (s.confirm?.tag !== tag || Date.now() - s.confirm.at > CONFIRM_MS) {
+      s.confirm = { tag, at: Date.now() };
+      s.status = `Send ${amount} to ${who(to)}? AUX again`;
+      return;
+    }
+    s.confirm = null;
+    s.status = `Sending ${amount} to ${who(to)}...`;
+    s.busy = true;
+    this.backend.transfer(s.mac, to.mac, amount)
+      .then(() => {
+        s.status = `Sent ${amount} HACK to ${who(to)}`;
+        to.status = `${who(s)} sent you ${amount} HACK`;
+      })
+      .catch((e) => { s.status = fit(`Failed: ${friendly(e)}`); })
+      .then(async () => {
+        s.busy = false;
+        for (const x of [s, to]) {
+          try { x.acct = await this.backend.account(x.mac, x.name); } catch { /* keep old */ }
+          this.push(x);
+        }
+      });
   }
 
   /** First contact: create and fund this badge's wallet, then redraw. */

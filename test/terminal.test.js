@@ -31,6 +31,11 @@ function fake(extraMarkets = 0) {
         acct.fresh = false;
         return { shares: spend * 1.5 };
       },
+      transfer: async (from, to, amount) => {
+        calls.push(['transfer', from, to, amount]);
+        acct.cash -= amount;
+        return { amount };
+      },
       sell: async (mac, slug, i, shares) => {
         calls.push(['sell', slug, i, shares]);
         acct.shares[slug][i] = 0;
@@ -162,4 +167,36 @@ test('every screen leaves rows 1..7 for the cursor and row 8 for status', async 
   assert.equal(t.lines(s).length, ROWS);
   assert.equal(t.lines(s).slice(1, 1 + ITEMS).filter(Boolean).length, 2, 'two markets, two rows');
   assert.ok(t.allFrames(s).every((f) => Buffer.byteLength(f) <= FRAME_MAX));
+});
+
+test('tapping badges hands over HACK', async () => {
+  const { backend, calls } = fake();
+  const sc = {};
+  const OTHER = 'E8:F6:0A:11:22:33';
+  // two badges on air: only keep the frames addressed to ours
+  const mine = (f) => f.filter((x) => x.startsWith(`M${TAG}`));
+  const t = new Terminal(backend, (f) => decode(mine(f), sc));
+  decode(mine(await t.handle(MAC, 'HMK10HAbhi Dutta')), sc);
+  await t.handle(OTHER, 'HMK10HNathan Ehnes');
+  await settle();
+
+  decode(mine(await t.handle(MAC, `HMK20G${tagOf(OTHER)}`)), sc);
+  assert.match(sc.rows[8], /Send 50 to Nathan\? AUX again/, 'first tap only asks');
+  assert.equal(calls.filter((c) => c[0] === 'transfer').length, 0);
+  decode(mine(await t.handle(MAC, `HMK21G${tagOf(OTHER)}`)), sc);   // retry, same seq
+  assert.match(sc.rows[8], /Send 50 to Nathan\?/, 'a retry is not a second tap');
+  decode(mine(await t.handle(MAC, `HMK30G${tagOf(OTHER)}`)), sc);
+  assert.match(sc.rows[8], /Sending 50 to Nathan/);
+  await settle();
+  assert.deepEqual(calls.at(-1), ['transfer', MAC, OTHER, 50]);
+  assert.match(sc.rows[8], /Sent 50 HACK to Nathan/);
+  assert.match(t.session(OTHER).status, /Abhi sent you 50 HACK/);
+
+  // a badge that never opened the app, and more than you have
+  decode(mine(await t.handle(MAC, 'HMK40GAAAAA')), sc);
+  assert.match(sc.rows[8], /has not opened the app/);
+  t.session(MAC).acct.cash = 1;
+  decode(mine(await t.handle(MAC, `HMK50G${tagOf(OTHER)}`)), sc);
+  assert.match(sc.rows[8], /Not enough HACK for 50/);
+  assert.equal(calls.filter((c) => c[0] === 'transfer').length, 1);
 });

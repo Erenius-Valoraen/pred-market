@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Keypair, PublicKey } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, createTransferInstruction } from '@solana/spl-token';
 import { DATA_DIR, UNIT, mintAmount } from './chain.js';
 import { connection, withRetry, sendIxs } from './rpc.js';
 import { buyIx, sellIx, ensureAtaIx, outcomeMintPda, fetchMarket } from './client.js';
@@ -109,9 +109,22 @@ export function createBadgeBackend({ op, hack, marketStates, onWallet = () => {}
     return { refund };
   }
 
+  /** Tap to pay: one badge hands play money to another, on-chain. */
+  async function transfer(fromMac, toMac, amount) {
+    const from = keypair(fromMac);
+    const to = keypair(toMac);
+    const dst = getAssociatedTokenAddressSync(hack, to.publicKey);
+    await sendIxs(op, [
+      ensureAtaIx(op.publicKey, hack, to.publicKey),
+      createTransferInstruction(getAssociatedTokenAddressSync(hack, from.publicKey), dst,
+        from.publicKey, units(amount)),
+    ], [from]);
+    return { amount };
+  }
+
   return {
     markets: () => markets,
-    account, buy, sell,
+    account, buy, sell, transfer,
     board: () => boardRows,
     setBoard(rows) {
       const macOf = new Map(Object.entries(wallets).map(([mac, w]) =>

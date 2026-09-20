@@ -9,6 +9,7 @@
 -- Uplink   (badge -> laptop): "HMK" seq try key
 --   key = "A" row   open / buy on the highlighted row      "B" back
 --         "S" row   sell everything on the highlighted row
+--         "G" tag   hand 50 HACK to the badge we are touching
 --         "N"/"P"   no room to move: next / previous page
 --         "L"/"R"   smaller / bigger trade size
 --         "H" name  opened the app
@@ -32,6 +33,7 @@ cg('collect')
 
 local rows, parts, text = {}, {}, {}
 local cur = 1                       -- highlighted row, 1..7 (0 is the header)
+local peer, peer_at = nil, 0        -- the badge we can hear loudest: a "tap"
 local on, me, seq, key, tries, at, heard = false, nil, 0, nil, 0, 0, false
 
 local function hl(r)
@@ -73,8 +75,13 @@ function on_tick()
       return
     end
     me = "M" .. sub((gsub(radio.mac(), ":", "")), -5)
-    radio.on_recv(function(_, _, p)
+    radio.on_recv(function(mac, rssi, p)
       heard = true
+      -- Badge apps cannot see the system's bump frames, so a "tap" is simply
+      -- another badge close enough to drown out the room.
+      if rssi > -45 and sub(p, 1, 3) == "HMK" then
+        peer, peer_at = sub((gsub(mac, ":", "")), -5), ms()
+      end
       if sub(p, 1, 6) == me then
         local c = byte(p, 7) - 48
         if c == 78 then                                    -- "~": ack
@@ -116,6 +123,9 @@ function on_button(b, kind)
   elseif b == 0 then tx("A" .. cur)
   elseif b == 8 then tx("S" .. cur)
   elseif b == 1 then tx("B")
+  elseif b == 7 then                                       -- AUX1: tap to send
+    if peer and ms() - peer_at < 4000 then tx("G" .. peer)
+    else rows[9]:set_text("Hold the badges together, then AUX") end
   elseif b == 4 then tx("L")
   elseif b == 5 then tx("R")
   end
