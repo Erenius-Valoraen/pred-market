@@ -20,6 +20,7 @@ import {
 const S = {
   view: 'markets',
   filter: 'all',
+  sort: 'hot',                // how the team board is ordered
   detail: null,               // slug of the market being read in full
   meta: [], markets: [], history: {}, board: [],
   wallet: null, balances: new Map(), sol: 0, hack: 0,
@@ -296,8 +297,14 @@ function renderTape() {
 }
 
 function wireMarketCards(root) {
-  $$('.side:not([disabled]), .lane:not([disabled])', root).forEach((b) => {
-    b.onclick = (e) => { press(b); openSheet(b.dataset.slug, Number(b.dataset.i), e); };
+  // The board's yes/no buttons sit inside a row that opens the market, so
+  // they have to stop the click travelling upwards.
+  $$('.side:not([disabled]), .lane:not([disabled]), .acts button[data-slug]', root).forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      press(b);
+      openSheet(b.dataset.slug, Number(b.dataset.i), e);
+    };
   });
   $$('[data-open]', root).forEach((b) => {
     b.onclick = () => openMarket(b.dataset.open);
@@ -317,13 +324,12 @@ function renderMarketsView() {
     host.innerHTML = '<div class="card empty">Loading markets…<div class="skeleton" style="width:100%"></div></div>';
     return;
   }
-  const live = S.markets.filter((m) => !m.missing);
+  // The grid holds the event questions: a handful, each one different. Teams
+  // are dozens of near-identical yes/no bets, so they get a board instead.
+  const live = S.markets.filter((m) => !m.missing && m.kind !== 'team');
   const open = live.filter((m) => m.status !== 'resolved');
   const done = live.filter((m) => m.status === 'resolved');
-  const pick = S.filter === 'team' ? open.filter((m) => m.kind === 'team')
-    : S.filter === 'seed' ? open.filter((m) => m.kind !== 'team')
-    : S.filter === 'done' ? done
-    : [...open, ...done];
+  const pick = [...open, ...done];
   const first = !host.children.length;
   host.innerHTML = pick.length ? pick.map(marketCard).join('')
     : '<div class="card empty">Nothing here yet.</div>';
@@ -392,22 +398,127 @@ function viewMarkets() {
       <button id="hero-phantom">I have a wallet</button></div>
     </section>`}
     <div class="stats" id="stats"></div>
-    <section class="panel" id="trending-panel">
-      <div class="section-head"><h2>Trending</h2><span class="small muted">biggest moves since the market opened</span></div>
-      <div class="trend" id="trending"></div>
+    <section class="panel" id="lead-panel">
+      <div class="section-head"><h2>Moving now</h2><span class="small muted">the biggest swing since these markets opened</span></div>
+      <div id="lead"></div>
+    </section>
+    <section class="panel">
+      <div class="section-head"><h2>The questions</h2><span class="small muted">about the event itself</span></div>
+      <div class="markets" id="markets-list"></div>
     </section>
     <section class="panel">
       <div class="section-head">
-        <h2>All markets</h2>
+        <h2>Teams</h2>
         <span class="small muted" id="market-count"></span>
         <span class="spacer"></span>
-        <div class="filters" id="filters">
-          ${[['all', 'All'], ['team', 'Teams'], ['seed', 'Event'], ['done', 'Settled']].map(([k, label]) =>
-            `<button class="tiny ${S.filter === k ? 'on' : ''}" data-filter="${k}">${label}</button>`).join('')}
+        <div class="filters" id="sorts">
+          ${[['hot', 'Hot'], ['chance', 'Chance'], ['volume', 'Volume'], ['new', 'New']].map(([k, label]) =>
+            `<button class="tiny ${S.sort === k ? 'on' : ''}" data-sort="${k}">${label}</button>`).join('')}
         </div>
       </div>
-      <div class="markets" id="markets-list"></div>
+      <div class="board-wrap card" id="team-board"></div>
     </section>`;
+}
+
+/** The one market worth looking at first, given room to breathe. */
+function renderLead() {
+  const host = $('#lead');
+  if (!host) return;
+  const open = S.markets.filter((m) => !m.missing && m.status !== 'resolved');
+  if (!open.length) { host.innerHTML = ''; return; }
+  const scored = open.map((m) => {
+    const i = isBinary(m) ? 0 : m.prices.indexOf(Math.max(...m.prices));
+    return { m, i, delta: movement(m, i) ?? 0 };
+  }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || stakes(b.m) - stakes(a.m));
+  const { m, i, delta } = scored[0];
+  const key = `${m.slug}|${m.prices[i].toFixed(4)}|${delta}|${held(m, i).toFixed(2)}`;
+  if (!changed('lead', key)) return;
+
+  const hist = series(m, i);
+  host.innerHTML = `<article class="card market lead" data-slug="${esc(m.slug)}">
+    <div class="lead-copy">
+      <div class="ticker-head">
+        <span class="sym">$${esc(symbol(m))}</span>
+        ${m.kind === 'team' ? '<span class="tag team">Team</span>' : '<span class="tag">Event</span>'}
+        ${moveBadge(delta)}
+        <span class="spacer"></span>
+        <span class="slip-no">NO. ${slipNo(m)}</span>
+      </div>
+      <button class="open-head" data-open="${esc(m.slug)}">
+        <h3>${esc(m.question)}</h3>
+        <span class="open-hint">Open market &rarr;</span>
+      </button>
+      <div class="quote-line">
+        <div>
+          <div class="label">${isBinary(m) ? 'Chance' : esc(m.outcomes[i])}</div>
+          <div class="big num">${pct(m.prices[i])}</div>
+        </div>
+        <span class="spacer"></span>
+        <span class="stake-line">
+          <span class="odds num">pays ${payout(m.prices[i])}</span>
+          <span class="small muted">${fmt(stakes(m), 0)} shares</span>
+        </span>
+      </div>
+      <div class="sides">
+        ${m.outcomes.slice(0, 2).map((o, k) => `
+          <button class="side ${k === 0 ? 'yes' : 'no'}" data-slug="${esc(m.slug)}" data-i="${k}">
+            <span class="name">${esc(o)}</span>
+            <span class="price num">${pct(m.prices[k])}</span>
+            <span class="odds num">pays ${payout(m.prices[k])}</span>
+          </button>`).join('')}
+      </div>
+    </div>
+    <div class="lead-chart">${priceChart(hist, { up: delta >= 0, h: 150 })}</div>
+  </article>`;
+  wireMarketCards(host);
+  popIn($('.lead', host));
+}
+
+/** Teams are many and alike, so they belong on a board, not in cards. */
+function renderTeamBoard() {
+  const host = $('#team-board');
+  if (!host) return;
+  const teams = S.markets.filter((m) => !m.missing && m.kind === 'team');
+  const rows = teams.map((m) => ({ m, delta: movement(m, 0) ?? 0, vol: stakes(m) }));
+  const order = {
+    hot: (a, b) => Math.abs(b.delta) - Math.abs(a.delta) || b.vol - a.vol,
+    chance: (a, b) => b.m.prices[0] - a.m.prices[0],
+    volume: (a, b) => b.vol - a.vol,
+    new: (a, b) => teams.indexOf(b.m) - teams.indexOf(a.m),
+  }[S.sort];
+  rows.sort(order);
+  const key = `${S.sort}|` + rows.map((r) => `${r.m.slug}${r.m.prices[0].toFixed(3)}${r.delta}${held(r.m, 0).toFixed(1)}`).join('');
+  if (!changed('board', key)) return;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="empty">No teams registered yet. Yours could be first.</div>';
+    return;
+  }
+  host.innerHTML = `
+    <div class="board-head">
+      <span>#</span><span>Team</span><span class="hide-sm">Trend</span>
+      <span class="ralign">Chance</span><span class="ralign hide-sm">Move</span><span></span>
+    </div>
+    ${rows.map(({ m, delta }, n) => {
+      const h = held(m, 0) + held(m, 1);
+      return `<div class="board-row" data-open="${esc(m.slug)}">
+        <span class="rank num">${n + 1}</span>
+        <span class="who">
+          <b>${esc(m.team?.name ?? m.question)}</b>
+          ${m.team?.project ? `<span class="small muted hide-sm">${esc(m.team.project)}</span>` : ''}
+          ${h > 0.001 ? `<span class="small">you hold ${fmt(h, 1)}</span>` : ''}
+        </span>
+        <span class="hide-sm">${sparkline(series(m, 0), { w: 72, h: 20, up: delta >= 0 })}</span>
+        <span class="chance num">${pct(m.prices[0])}</span>
+        <span class="ralign hide-sm">${moveBadge(delta)}</span>
+        <span class="acts">
+          <button class="tiny yes" data-slug="${esc(m.slug)}" data-i="0">Yes</button>
+          <button class="tiny no" data-slug="${esc(m.slug)}" data-i="1">No</button>
+        </span>
+      </div>`;
+    }).join('')}`;
+  wireMarketCards(host);
+  $$('.board-row', host).forEach((r, i) => popIn(r, Math.min(i, 8) * 30));
 }
 
 /** The numbers that tell you the room is alive. */
@@ -640,14 +751,16 @@ function renderView() {
   if (S.view === 'markets') {
     renderMarketsView();
     renderTape();
-    renderTrending();
+    renderLead();
+    renderTeamBoard();
     renderStats();
-    $$('#filters button').forEach((b) => {
+    $$('#sorts button').forEach((b) => {
       b.onclick = () => {
         press(b);
-        S.filter = b.dataset.filter;
-        $$('#filters button').forEach((x) => x.classList.toggle('on', x.dataset.filter === S.filter));
-        renderMarketsView();
+        S.sort = b.dataset.sort;
+        $$('#sorts button').forEach((x) => x.classList.toggle('on', x.dataset.sort === S.sort));
+        lastKey.board = null;
+        renderTeamBoard();
       };
     });
     const hs = $('#hero-start');
@@ -988,11 +1101,20 @@ async function poll() {
 function draw() {
   $('#live').classList.toggle('stale', Date.now() - S.lastOk > 20_000);
   renderWallet();
-  if (S.view === 'markets') { renderMarketsView(); renderTape(); renderTrending(); renderStats(); }
+  if (S.view === 'markets') {
+    renderMarketsView();
+    renderTape();
+    renderLead();
+    renderTeamBoard();
+    renderStats();
+  }
   if (S.view === 'you' || S.view === 'detail') renderView();
   renderRail();
   const count = $('#market-count');
-  if (count) count.textContent = `${S.markets.filter((m) => !m.missing).length} open · priced on-chain`;
+  if (count) {
+    const teams = S.markets.filter((m) => !m.missing && m.kind === 'team').length;
+    count.textContent = `${teams} registered · tap a row to open it`;
+  }
   if (S.sheet) updateQuote();
 }
 

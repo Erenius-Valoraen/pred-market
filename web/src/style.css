@@ -409,6 +409,73 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
 .detail-trade { display: grid; gap: var(--s2); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .detail .side .price { font-size: 26px; }
 
+/* --------------------------------------------------------- the lead story */
+.market.lead {
+  display: grid;
+  gap: var(--s4);
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--s4);
+}
+@media (min-width: 820px) {
+  .market.lead { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: center; }
+}
+.lead-copy { display: grid; gap: var(--s3); align-content: start; min-width: 0; }
+.lead .quote-line .big { font-size: 58px; }
+.lead h3 { font-size: 24px; }
+.lead-chart .chart, .lead-chart .empty-chart { height: 150px; }
+
+/* ----------------------------------------------------------- the team board */
+.board-wrap { overflow: hidden; }
+.board-head, .board-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 84px 76px 92px 112px;
+  align-items: center;
+  gap: var(--s2);
+  padding: 10px var(--s3);
+}
+.board-head {
+  border-bottom: 2px solid var(--ink);
+  background: var(--surface-2);
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--muted);
+}
+.board-row {
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background .15s var(--ease);
+}
+.board-row:last-child { border-bottom: 0; }
+.board-row:hover { background: var(--surface-2); }
+.board-row .who { display: grid; gap: 1px; min-width: 0; }
+.board-row .who b { font-size: 15px; }
+.board-row .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-row .chance {
+  font-family: 'Archivo Black', sans-serif;
+  font-size: 22px;
+  text-align: right;
+  letter-spacing: -.02em;
+}
+.board-row .rank { color: var(--muted); font-size: 12px; }
+.board-row:nth-child(2) .rank { color: var(--gold); }
+.ralign { text-align: right; justify-self: end; }
+.acts { display: flex; gap: 6px; justify-content: flex-end; }
+.acts .yes { border-color: var(--yes); color: var(--yes); box-shadow: 2px 2px 0 var(--yes); }
+.acts .no { border-color: var(--no); color: var(--no); box-shadow: 2px 2px 0 var(--no); }
+.board-row .spark { width: 72px; height: 20px; }
+
+@media (max-width: 760px) {
+  /* On a phone the row keeps the team, the number and the two buttons: the
+     project blurb only fits as an ellipsis, which tells nobody anything. */
+  .board-head, .board-row { grid-template-columns: 22px minmax(0, 1fr) 56px 92px; gap: 8px; padding: 10px 10px; }
+  .board-row .who b { font-size: 14px; }
+  .hide-sm { display: none; }
+  .board-row .chance { font-size: 18px; }
+  .acts .tiny { padding: 7px 9px; }
+}
+
 /* -------------------------------------------------------------- the slips */
 .markets { display: grid; gap: var(--s4); align-items: start; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
 
@@ -595,7 +662,7 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
 .lane:last-child { border-bottom: 0; }
 .lane:hover { background: var(--surface-2); }
 .lane:active { transform: none; box-shadow: none; }
-.lane .who { font-size: 14px; font-weight: 600; }
+.lane .who { font-size: 14px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .lane.lead .who::before {
   content: '\2605';
   color: var(--gold);
@@ -603,8 +670,12 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
 }
 .lane .pct { font-family: 'Space Mono', monospace; font-size: 14px; font-weight: 700; }
 .lane .pct .odds { color: var(--muted); margin-left: 6px; }
+/* The runner's marker hangs 8px past each end of its track, so the track is
+   inset by that much: on a phone the diamond would otherwise push the row
+   sideways. */
 .lane .track {
   grid-column: 1 / -1;
+  margin: 0 8px;
   position: relative;
   height: 10px;
   border: 1px solid var(--line);

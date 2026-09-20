@@ -20,7 +20,7 @@ import { Keypair, PublicKey } from '@solana/web3.js';
 import { operatorKeypair, mintAmount, tokenBalance, DATA_DIR, UNIT, solBalance } from './chain.js';
 import { sendIxs } from './rpc.js';
 import { buyIx, sellIx, ensureAtaIx, fetchMarket, loadDeployment } from './client.js';
-import { registerTeam, loadMarkets } from './registry.js';
+import { registerTeam, loadMarkets, saveMarkets } from './registry.js';
 import * as lmsr from './lmsr.js';
 
 const DRY = process.argv.includes('--dry');
@@ -34,16 +34,25 @@ const TRADES = arg('trades', 36);
 const START_HACK = 1000;
 
 const TEAM_BOOK = [
-  ['Rubber Duck Debuggers', 'Pair programming with a duck that talks back', 'E7-114'],
-  ['Late Night Compilers', 'Rust toolchain that explains its own errors', 'E7-036'],
-  ['Segfault Symphony', 'Turning crash dumps into music', 'E5-221'],
-  ['Kernel Panic Attack', 'A calmer terminal for people learning Linux', 'E7-208'],
-  ['Caffeine Overflow', 'Espresso queue tracker for the hall', 'DC-160'],
-  ['The Merge Conflicts', 'Live merge resolution over voice', 'E5-118'],
-  ['Undefined Behaviour', 'Fuzzing playground you can drive from a phone', 'E7-042'],
-  ['Null Pointer Express', 'Trains, but for packets', 'DC-204'],
-  ['Stack Overflowers', 'Answers ranked by how often they actually worked', 'E5-330'],
-  ['Heap of Trouble', 'Memory profiler with a conscience', 'E7-155'],
+  ['Northwind', 'Offline-first notes that sync when you get signal', 'E7-114'],
+  ['Halcyon', 'Calmer incident dashboards for on-call engineers', 'E7-036'],
+  ['Ironwood', 'Structural analysis you can run from a phone', 'E5-221'],
+  ['Bluejay', 'Transit alerts that actually arrive before the bus', 'E7-208'],
+  ['Copperline', 'Power monitoring for old buildings', 'DC-160'],
+  ['Quartz', 'Search across everything a team has ever written', 'E5-118'],
+  ['Meridian', 'Scheduling across timezones without the spreadsheet', 'E7-042'],
+  ['Lantern', 'Reading help for low-vision students', 'DC-204'],
+  ['Foxglove', 'Plant health from a cheap camera', 'E5-330'],
+  ['Kestrel', 'Drone flight logs that explain themselves', 'E7-155'],
+];
+
+// The first pass used jokier names; --retire hides those markets so the
+// board reads like a real event. They stay on-chain, just out of sight.
+const RETIRED = [
+  'Rubber Duck Debuggers', 'Late Night Compilers', 'Segfault Symphony',
+  'Kernel Panic Attack', 'Caffeine Overflow', 'The Merge Conflicts',
+  'Undefined Behaviour', 'Null Pointer Express', 'Stack Overflowers',
+  'Heap of Trouble', 'UI Smoke Test', 'Test Badge',
 ];
 
 const TRADER_BOOK = [
@@ -81,6 +90,15 @@ async function main() {
   }
 
   // ------------------------------------------------------------- teams
+  if (process.argv.includes('--retire')) {
+    const list = loadMarkets();
+    let n = 0;
+    for (const m of list) {
+      if (m.kind === 'team' && RETIRED.includes(m.team?.name) && !m.hidden) { m.hidden = true; n += 1; }
+    }
+    saveMarkets(list);
+    console.log(`  retired ${n} earlier demo team(s) - hidden from the site and the badges`);
+  }
   const existing = new Set(loadMarkets().map((m) => m.team?.name?.toLowerCase()).filter(Boolean));
   for (const [name, project, table] of TEAM_BOOK.slice(0, TEAMS)) {
     if (existing.has(name.toLowerCase())) { console.log(`  team exists  ${name}`); continue; }
