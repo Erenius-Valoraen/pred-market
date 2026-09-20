@@ -1,75 +1,54 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0b0d12" />
-  <title>HTN Market</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%237c5cff'/><path d='M7 22l6-7 5 4 7-9' stroke='%2314f195' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
-  <link rel="stylesheet" href="/src/style.css" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>HTN Market — bet on Hack the North</title>
+<meta name="description" content="A play-money prediction market on Hack the North 2026, priced by a Solana program." />
+<meta name="theme-color" content="#f4f2ed" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#101214" media="(prefers-color-scheme: dark)" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%2315181c'/><path d='M8 21l5-7 4 4 7-9' stroke='%230b9d63' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+<link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
   <header class="top">
-    <div class="brand">
-      <div class="logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#7c5cff"/><path d="M7 22l6-7 5 4 7-9" stroke="#14f195" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <div>
-        <h1>HTN Market</h1>
-        <p class="tag">Prediction markets on Hack the North &middot; priced on-chain by Solana</p>
-      </div>
-    </div>
-    <div id="wallet" class="wallet"></div>
+    <a class="brand" href="#markets"><span class="mark">HM</span><span class="name">HTN Market</span></a>
+    <span class="live" id="live">live</span>
+    <span class="spacer"></span>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Sections">
+      <span class="indicator" id="tab-indicator"></span>
+      <button role="tab" data-view="markets" aria-selected="true">Markets</button>
+      <button role="tab" data-view="leaders" aria-selected="false">Leaderboard</button>
+      <button role="tab" data-view="register" aria-selected="false">Register a team</button>
+    </nav>
+    <div id="wallet" class="row"></div>
   </header>
 
-  <div id="notice" class="notice" hidden></div>
-  <section id="onboard"></section>
-
-  <main class="layout">
-    <section>
-      <div class="section-head">
-        <h2>Markets</h2>
-        <span id="live" class="live"><i></i>live from chain</span>
-      </div>
-      <div id="markets" class="markets"><p class="muted">Loading markets from Solana&hellip;</p></div>
-    </section>
-    <aside class="side">
-      <div class="panel">
-        <h3>Your book</h3>
-        <div id="book"><p class="muted">Connect a wallet to trade.</p></div>
-      </div>
-      <div class="panel">
-        <h3>Leaderboard</h3>
-        <ol id="board" class="board"><li class="muted">Loading&hellip;</li></ol>
-      </div>
-      <div class="panel">
-        <h3>Your activity</h3>
-        <ul id="activity" class="activity"><li class="muted">No trades yet.</li></ul>
-      </div>
-    </aside>
+  <main id="main" class="with-rail">
+    <div id="view"></div>
+    <aside class="rail" id="rail"></aside>
   </main>
 
-  <div id="sheet" class="sheet" hidden>
-    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-      <button class="x" id="sheet-close" aria-label="Close">&times;</button>
-      <p class="muted small" id="sheet-q"></p>
-      <h3 id="sheet-title"></h3>
-      <div class="tabs" id="sheet-tabs"></div>
-      <label class="field">
-        <span id="amount-label">Spend (HACK)</span>
-        <input id="amount" type="number" inputmode="decimal" min="0" step="any" placeholder="0" />
-      </label>
-      <div class="chips" id="chips"></div>
-      <dl class="quote" id="quote"></dl>
-      <button class="primary" id="go"></button>
-      <p class="status" id="status" aria-live="polite"></p>
-    </div>
-  </div>
+  <nav class="bottom" id="bottom-nav" role="tablist" aria-label="Sections">
+    <button role="tab" data-view="markets" aria-selected="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-7 4 4 8-9"/><path d="M14 5h7v7"/></svg>
+      Markets
+    </button>
+    <button role="tab" data-view="leaders" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 01-10 0z"/><path d="M17 5h3a3 3 0 01-3 3"/><path d="M7 5H4a3 3 0 003 3"/></svg>
+      Leaders
+    </button>
+    <button role="tab" data-view="register" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+      Register
+    </button>
+    <button role="tab" data-view="you" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-6.2-8.6"/><path d="M12 7v5l3 2"/></svg>
+      You
+    </button>
+  </nav>
 
-  <footer class="foot">
-    <span>Program <a id="prog" target="_blank" rel="noopener"></a></span>
-    <span>Prices are computed by the program, not this website. Play money on devnet.</span>
-  </footer>
-  <script type="module" src="/src/main.js"></script>
+  <div id="toasts"></div>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

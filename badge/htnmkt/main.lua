@@ -33,8 +33,10 @@ cg('collect')
 
 local rows, parts, text = {}, {}, {}
 local cur = 1                       -- highlighted row, 1..7 (0 is the header)
-local peer, peer_at = nil, 0        -- the badge we can hear loudest: a "tap"
+local peer, peer_at, pbest = nil, 0, -127   -- loudest badge nearby: our "tap"
+local TAP, TAP_MS = -62, 10000      -- measured: touching badges hear ~ -54 dBm
 local held = 0                      -- when START went down, for hold-to-pay
+local starts = 0                    -- radio start attempts (it needs ~50 KB)
 local on, me, seq, key, tries, at, heard = false, nil, 0, nil, 0, 0, false
 
 local function hl(r)
@@ -66,22 +68,33 @@ function on_tick()
   -- letting garbage pile up instead crashed the badge.
   if heard then heard = false cg('collect') else cg('step', 1) end
   local now = ms()
+  if peer and now - peer_at > TAP_MS then peer, pbest = nil, -127 end
   if not on then
     if now < at then return end
     cg('collect')
     on = radio.enable()
     if not on then
-      rows[1]:set_text("Radio failed - HOME, then reopen")
-      at = now + 1e9
+      -- Bluetooth wants ~50 KB and what the launcher left behind varies, so a
+      -- retry after another collection often gets it. If it never comes up,
+      -- a reboot is the only thing that reliably frees the memory.
+      starts = starts + 1
+      if starts < 4 then
+        rows[1]:set_text("Radio busy - retrying " .. starts .. "/3")
+        at = now + 1500
+      else
+        rows[1]:set_text("No radio: reboot the badge, then reopen")
+        at = now + 1e9
+      end
       return
     end
     me = "M" .. sub((gsub(radio.mac(), ":", "")), -5)
     radio.on_recv(function(mac, rssi, p)
       heard = true
       -- Badge apps cannot see the system's bump frames, so a "tap" is simply
-      -- another badge close enough to drown out the room.
-      if rssi > -45 and sub(p, 1, 3) == "HMK" then
-        peer, peer_at = sub((gsub(mac, ":", "")), -5), ms()
+      -- the badge we hear loudest: measured, touching is about -54 dBm and we
+      -- only catch each other every few seconds, hence the wide window.
+      if sub(p, 1, 3) == "HMK" and rssi > TAP and rssi > pbest then
+        peer, peer_at, pbest = sub((gsub(mac, ":", "")), -5), ms(), rssi
       end
       if sub(p, 1, 6) == me then
         local c = byte(p, 7) - 48
@@ -118,7 +131,7 @@ function on_button(b, kind)
   if b == 8 then                                           -- START: tap or sell
     if kind == 0 then held = ms() return end               -- 0 = pressed
     if ms() - held < 600 then tx("S" .. cur)               -- a quick press sells
-    elseif peer and ms() - peer_at < 4000 then tx("G" .. peer)
+    elseif peer then tx("G" .. peer)
     else rows[9]:set_text("Hold the badges together, then hold START") end
     return
   end

@@ -129,7 +129,9 @@ function cleanName(s) {
 
 // ------------------------------------------------------------ chain reads
 async function marketStates() {
-  const list = loadMarkets();
+  // `hidden` markets (the ones created while testing) stay on-chain but are
+  // not offered to traders on the web page or the badges.
+  const list = loadMarkets().filter((m) => !m.hidden);
   const infos = await withRetry(() =>
     connection.getMultipleAccountsInfo(list.map((m) => new PublicKey(m.address))));
   return list.map((m, i) => {
@@ -200,6 +202,59 @@ const refreshBoard = () => leaderboard().then((rows) => badgeBackend.setBoard(ro
 setInterval(refreshBoard, 20_000).unref();
 refreshBoard();
 
+// ------------------------------------------------------- price history
+// A few hours of prices per market, sampled from the same chain reads the
+// badges use, so the web page can draw a sparkline without asking Solana for
+// history it does not keep.
+const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const HISTORY_MAX = 120;              // samples kept per market (~2 h at 60 s)
+let history = {};
+try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { /* first run */ }
+
+async function sampleHistory() {
+  const markets = await marketStates();
+  for (const m of markets) {
+    if (m.missing || !m.prices) continue;
+    const row = (history[m.slug] ??= []);
+    const p = Math.round(m.prices[0] * 1000) / 1000;
+    if (row.at(-1) !== p || row.length < 2) row.push(p);
+    if (row.length > HISTORY_MAX) row.splice(0, row.length - HISTORY_MAX);
+  }
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+}
+setInterval(() => sampleHistory().catch(() => {}), 60_000).unref();
+sampleHistory().catch(() => {});
+
+// --------------------------------------------------------- registration
+// Teams register themselves on the site. Each one opens a real market on
+// Solana, which costs the operator SOL, so this is rate limited per network
+// and capped overall; the duplicate-name check lives in registerTeam.
+const REGISTER_PER_HOUR = 4;
+const MAX_TEAM_MARKETS = 150;
+const regHits = new Map();
+
+async function handleRegister(req, body) {
+  const ip = req.socket.remoteAddress ?? '?';
+  const hour = Date.now() - 3_600_000;
+  const hits = (regHits.get(ip) ?? []).filter((t) => t > hour);
+  if (hits.length >= REGISTER_PER_HOUR) {
+    return [429, { error: 'too many teams registered from this network in the last hour' }];
+  }
+  if (loadMarkets().filter((m) => m.kind === 'team').length >= MAX_TEAM_MARKETS) {
+    return [503, { error: 'team registration is full - find an organizer' }];
+  }
+  const r = await serialized(() => registerTeam(op, HACK, {
+    team: body.team, project: body.project, table: body.table,
+    members: (Array.isArray(body.members) ? body.members : []).slice(0, 8),
+  }));
+  if (!r.duplicate) {
+    hits.push(Date.now());
+    regHits.set(ip, hits);
+  }
+  boardCache.at = 0;
+  return [200, r];
+}
+
 // ---------------------------------------------------------------- handlers
 async function handleFaucet(req, body) {
   let wallet;
@@ -235,7 +290,9 @@ async function route(req, url, body) {
   if (url.pathname === '/api/config') {
     return [200, { programId: PROGRAM_ID.toBase58(), hackMint: HACK.toBase58(), rpc: RPC_URL, decimals: 6 }];
   }
-  if (url.pathname === '/api/markets') return [200, loadMarkets()];
+  if (url.pathname === '/api/markets') return [200, loadMarkets().filter((m) => !m.hidden)];
+  if (url.pathname === '/api/history') return [200, history];
+  if (url.pathname === '/api/register' && req.method === 'POST') return handleRegister(req, body);
   if (url.pathname === '/api/leaderboard') return [200, await leaderboard()];
   if (url.pathname === '/api/faucet' && req.method === 'POST') return handleFaucet(req, body);
 
