@@ -358,6 +358,7 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
   border-radius: var(--radius-sm);
   font-size: 14px;
 }
+.board li.muted { grid-template-columns: 1fr; background: none; }
 .board li:nth-child(odd) { background: var(--surface-2); }
 .board li.me { background: var(--yes-soft); font-weight: 600; }
 .board .rank { font-family: 'DM Mono', monospace; color: var(--muted); }
