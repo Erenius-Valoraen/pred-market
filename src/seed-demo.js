@@ -28,6 +28,10 @@ const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > 0 ? Number(process.argv[i + 1]) : fallback;
 };
+// --only <slug,slug>: trade just these markets, for pricing a question that
+// was added after the first seeding run.
+const onlyAt = process.argv.indexOf('--only');
+const ONLY = onlyAt > 0 ? process.argv[onlyAt + 1].split(',').map((x) => x.trim()) : null;
 const TEAMS = arg('teams', 8);
 const TRADERS = arg('traders', 6);
 const TRADES = arg('trades', 36);
@@ -137,7 +141,10 @@ async function main() {
   // ------------------------------------------------------------ trades
   // Each market gets a side the room leans towards, so prices end up spread
   // out and moving instead of every card sitting at 50%.
-  const markets = loadMarkets().filter((m) => !m.hidden);
+  const markets = loadMarkets()
+    .filter((m) => !m.hidden)
+    .filter((m) => !ONLY || ONLY.includes(m.slug));
+  if (!markets.length) throw new Error(`no markets match --only ${ONLY?.join(',')}`);
   const history = readJson(HISTORY_FILE, {});
   const lean = new Map(markets.map((m) => [m.slug, rnd() < 0.5 ? 0 : 1 % m.outcomes.length]));
   let done = 0;

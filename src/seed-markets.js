@@ -5,6 +5,15 @@
 // resolver's mood instead of the event. If a rule can't be checked from a
 // public source at closing ceremony, the market doesn't belong here.
 
+// Questions that turned out to have an obvious answer, replaced above rather
+// than reworded: the question text is hashed into the market's creation
+// transaction, so editing it in place would break its own commitment. These
+// stay on-chain and keep their history; they just leave the board.
+export const RETIRED_SEEDS = {
+  'hw-finalist': 'near-certain YES: replaced by hw-finalist-count',
+  'badge-wins': 'a badge prize exists, so this is ~100%: replaced by badge-radio',
+};
+
 export const SEED_MARKETS = [
   {
     id: 'submissions',
@@ -17,13 +26,14 @@ export const SEED_MARKETS = [
     },
   },
   {
-    id: 'hw-finalist',
-    short: 'Hardware finalist?',
-    question: 'Will a hardware project be named a Finalist?',
-    outcomes: ['YES', 'NO'],
-    subsidy: 200,
+    id: 'hw-finalist-count',
+    short: 'Hardware finalists',
+    question: 'How many of the Finalists will be hardware projects?',
+    outcomes: ['None', 'One', 'Two', 'Three or more'],
+    subsidy: 250,
     meta: {
-      resolves: 'YES if any of the announced Finalists has physical hardware as a core component (not just a phone or laptop).',
+      resolves: 'Count of announced Finalists with physical hardware as a core component '
+        + '(not just a phone or laptop), from the closing ceremony list.',
     },
   },
   {
@@ -37,13 +47,14 @@ export const SEED_MARKETS = [
     },
   },
   {
-    id: 'badge-wins',
-    short: 'Badge project wins?',
-    question: 'Will a project built on the Hacker Badge win any prize?',
+    id: 'badge-radio',
+    short: 'Badge prize uses radio?',
+    question: "Will the Hacker Badge prize go to a project that uses the badge's radio?",
     outcomes: ['YES', 'NO'],
     subsidy: 200,
     meta: {
-      resolves: 'YES if any prize (sponsor track or finalist) goes to a project whose Devpost lists the Hacker Badge.',
+      resolves: "YES if the winning badge project's Devpost or demo shows badge-to-badge or "
+        + 'badge-to-host wireless communication, rather than only the screen, buttons and LEDs.',
     },
   },
   {

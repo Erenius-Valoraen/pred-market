@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HTN Market">
+  <title>Solana's bars as a candlestick</title>
+  <rect width="64" height="64" rx="12" fill="#14110e"/>
+  <!-- Three slanted bars, Solana's signature - but the middle one carries a
+       candlestick's wicks, so the same shape reads as a price. -->
+  <path d="M18 43 L41 43 L35 51 L12 51 Z" fill="#efe9db"/>
+  <path d="M21 28 L44 28 L38 36 L15 36 Z" fill="#146b3a"/>
+  <rect x="28" y="19" width="4" height="30" fill="#146b3a"/>
+  <path d="M24 13 L47 13 L41 21 L18 21 Z" fill="#c8912a"/>
+</svg>

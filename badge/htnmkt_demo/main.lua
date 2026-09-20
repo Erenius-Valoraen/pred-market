@@ -31,14 +31,14 @@ local BAR_X, BAR_W = 10, 176              -- the bar ends well before the number
 
 -- The questions this market actually asks, worded as they are on the site.
 local markets = {
-  { sym = 'HWF', name = 'Hardware project wins',
-    q = 'Will a hardware project be named a Finalist?', p = 0.62, hold = 0 },
+  { sym = 'HWF', name = 'Two+ hardware finalists',
+    q = 'Will two or more Finalists be hardware projects?', p = 0.66, hold = 0 },
   { sym = 'DPC', name = '300+ projects submitted',
     q = 'Will 300 or more projects be submitted on Devpost?', p = 0.41, hold = 0 },
   { sym = 'AIB', name = 'Best Overall is an AI build',
     q = 'Will the Best Overall winner be an AI project?', p = 0.28, hold = 0 },
-  { sym = 'BDG', name = 'Badge hack wins a prize',
-    q = 'Will a project built on the Hacker Badge win any prize?', p = 0.55, hold = 0 },
+  { sym = 'BDG', name = 'Badge prize uses radio',
+    q = "Will the Hacker Badge prize go to a project that uses the badge's radio?", p = 0.47, hold = 0 },
   { sym = 'QNX', name = 'QNX winner runs on a Pi',
     q = 'Will the QNX prize winner run on a Raspberry Pi?', p = 0.37, hold = 0 },
   { sym = 'SLO', name = 'Solo hacker in the top 5',

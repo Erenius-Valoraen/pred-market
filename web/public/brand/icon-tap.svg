@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="HTN Market">
+  <title>Two badges, mid-tap</title>
+  <rect width="64" height="64" rx="12" fill="#efe9db"/>
+  <!-- Two badges leaning into each other: the tap that moves the money. -->
+  <g transform="rotate(-12 18 32)">
+    <rect x="4" y="16" width="22" height="32" rx="4" fill="#14110e"/>
+    <rect x="8" y="22" width="14" height="16" rx="1.5" fill="#efe9db"/>
+    <path d="M11 33 L20 33 L18 36 L9 36 Z" fill="#146b3a"/>
+  </g>
+  <g transform="rotate(12 46 32)">
+    <rect x="38" y="16" width="22" height="32" rx="4" fill="#14110e"/>
+    <rect x="42" y="22" width="14" height="16" rx="1.5" fill="#efe9db"/>
+    <path d="M45 33 L54 33 L52 36 L43 36 Z" fill="#c8912a"/>
+  </g>
+  <!-- Solana's bars as the thing arcing across the gap. -->
+  <path d="M29 24 L37 24 L35 28 L27 28 Z" fill="#c8912a"/>
+  <path d="M28 31 L36 31 L34 35 L26 35 Z" fill="#14110e"/>
+  <path d="M27 38 L35 38 L33 42 L25 42 Z" fill="#146b3a"/>
+</svg>

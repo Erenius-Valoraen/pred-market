@@ -3,7 +3,7 @@
 import { operatorKeypair, PublicKey } from './chain.js';
 import { loadDeployment } from './client.js';
 import { ensureMarket, loadMarkets, saveMarkets, MARKETS_FILE } from './registry.js';
-import { SEED_MARKETS } from './seed-markets.js';
+import { SEED_MARKETS, RETIRED_SEEDS } from './seed-markets.js';
 
 const op = operatorKeypair();
 const dep = loadDeployment();
@@ -20,5 +20,14 @@ for (const def of SEED_MARKETS) {
   bySlug.set(rec.slug, { ...rec, ...bySlug.get(rec.slug), created: rec.created });
   console.log(`${rec.created.padEnd(8)} ${rec.slug.padEnd(15)} ${rec.address}`);
 }
+// Replaced questions leave the board but keep their on-chain history.
+for (const [slug, why] of Object.entries(RETIRED_SEEDS)) {
+  const rec = bySlug.get(slug);
+  if (rec && !rec.hidden) {
+    rec.hidden = true;
+    console.log(`retired  ${slug.padEnd(15)} ${why}`);
+  }
+}
+
 saveMarkets([...bySlug.values()]);
 console.log(`\n${bySlug.size} markets recorded in ${MARKETS_FILE}`);
