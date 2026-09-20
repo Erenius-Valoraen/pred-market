@@ -336,6 +336,32 @@ main:not(.with-rail) > #view { max-width: 680px; margin: 0 auto; width: 100%; di
 .filters { display: flex; gap: var(--s1); flex-wrap: wrap; }
 .filters button.on { background: var(--ink); color: var(--paper); }
 
+/* ------------------------------------------------------------- the account */
+.pill.account {
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--ink);
+  display: inline-block;
+}
+.sheet .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  flex: 1;
+}
+.sheet .row { display: flex; gap: var(--s2); }
+.sheet .row > * { flex: 1; }
+
 /* ------------------------------------------------------------- one market */
 .back {
   justify-self: start;

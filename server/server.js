@@ -131,12 +131,40 @@ function cleanName(s) {
 // One cache for everything that reads market accounts: the web feed, the
 // badges, the leaderboard and the history sampler. Devnet's public RPC
 // rate-limits hard, and a room full of traders must not multiply that.
+const STATE_FILE = path.join(DATA_DIR, 'state.json');
 let statesCache = { at: 0, rows: [] };
+try {
+  const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  statesCache = { at: 0, rows: saved.rows ?? [], savedAt: saved.at };
+} catch { /* first run */ }
+
+/**
+ * The last known market state, refreshed when it is stale enough.
+ *
+ * If the refresh fails (devnet's public RPC throttles an address hard) we
+ * keep serving what we had: a price a minute old is useful, a blank page is
+ * not. The last good read is also written to disk, so a restart in the
+ * middle of the event still has something to show.
+ */
+let refreshing = null;
 async function marketStates(maxAge = 8000) {
-  if (Date.now() - statesCache.at < maxAge) return statesCache.rows;
-  const rows = await readMarketStates();
-  statesCache = { at: Date.now(), rows };
-  return rows;
+  const age = Date.now() - statesCache.at;
+  if (age < maxAge && statesCache.rows.length) return statesCache.rows;
+  if (!refreshing) {
+    refreshing = readMarketStates()
+      .then((rows) => {
+        statesCache = { at: Date.now(), rows };
+        fs.writeFile(STATE_FILE, JSON.stringify({ at: statesCache.at, rows }), () => {});
+        return rows;
+      })
+      .catch((e) => {
+        console.error('[state] refresh failed, serving the last good read:', String(e.message).slice(0, 90));
+        return statesCache.rows;
+      })
+      .finally(() => { refreshing = null; });
+  }
+  // Only wait for the network if we have nothing at all to show.
+  return statesCache.rows.length ? statesCache.rows : refreshing;
 }
 
 async function readMarketStates() {

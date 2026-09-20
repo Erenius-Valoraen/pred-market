@@ -96,16 +96,99 @@ function changed(region, key) {
 // ------------------------------------------------------------------ header
 function renderWallet() {
   const w = $('#wallet');
-  if (!changed('wallet', `${S.wallet?.publicKey.toBase58() ?? ''}|${S.hack.toFixed(4)}`)) return;
+  if (!changed('wallet', `${S.wallet?.publicKey.toBase58() ?? ''}|${S.hack.toFixed(4)}|${S.wallet?.kind ?? ''}`)) return;
   if (!S.wallet) {
-    w.innerHTML = '<button class="primary" id="w-connect">Start trading</button>';
-    $('#w-connect').onclick = (e) => { press(e.currentTarget); connect('burner'); };
+    w.innerHTML = '<button class="primary" id="w-login">Log in</button>';
+    $('#w-login').onclick = (e) => { press(e.currentTarget); openLogin(); };
     return;
   }
   const k = S.wallet.publicKey.toBase58();
-  w.innerHTML = `<span class="pill" title="Your play-money balance"><b class="num" id="hack-top">0.00</b> HACK</span>
-    <a class="pill addr" href="${chain.explorer('address', k)}" target="_blank" rel="noopener">${esc(short(k))}</a>`;
+  w.innerHTML = `
+    <span class="pill" title="Your play-money balance"><b class="num" id="hack-top">0.00</b> HACK</span>
+    <button class="pill account" id="w-account" aria-haspopup="menu">
+      <span class="avatar" style="background:${avatarColor(k)}"></span>
+      <span class="num">${esc(short(k))}</span>
+    </button>`;
   rollTo($('#hack-top'), S.hack, { digits: 2 });
+  $('#w-account').onclick = (e) => { press(e.currentTarget); openAccount(); };
+}
+
+/** A stable colour per wallet, so you recognise your own at a glance. */
+function avatarColor(key) {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 58% 45%)`;
+}
+
+/** Signing in is a choice between "just let me play" and "I have a wallet". */
+function openLogin() {
+  const back = el(`<div class="sheet-backdrop" id="sheet-backdrop">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Log in">
+      <div class="grab"></div>
+      <h3>Log in to trade</h3>
+      <p class="small muted" style="margin:0">No email, no password. Pick one:</p>
+      <button class="primary" id="l-burner">Create a quick wallet</button>
+      <p class="small muted" style="margin:-4px 0 0">Made in this browser, funded with 1,000 play HACK.
+      Nothing to install. Clearing site data loses it.</p>
+      <button id="l-phantom">Connect Phantom</button>
+      <p class="small muted" style="margin:-4px 0 0">Use a wallet you already have. Same play money, same markets.</p>
+      <button class="ghost" id="l-cancel">Not now</button>
+    </div>
+  </div>`);
+  document.body.append(back);
+  animate(back.firstElementChild, [{ transform: 'translateY(24px)', opacity: .4 }, { transform: 'none', opacity: 1 }],
+    { duration: 400, easing: SPRING });
+  back.onclick = (e) => { if (e.target === back) closeSheet(); };
+  $('#l-burner').onclick = () => { closeSheet(); connect('burner'); };
+  $('#l-phantom').onclick = () => { closeSheet(); connect('phantom'); };
+  $('#l-cancel').onclick = () => closeSheet();
+}
+
+/** Who you are, and the two things you might want to do about it. */
+function openAccount() {
+  const k = S.wallet.publicKey.toBase58();
+  const back = el(`<div class="sheet-backdrop" id="sheet-backdrop">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Account">
+      <div class="grab"></div>
+      <h3>Your account</h3>
+      <div class="kv"><span>Wallet</span><b class="num small">${esc(k.slice(0, 12))}\u2026${esc(k.slice(-6))}</b></div>
+      <div class="kv"><span>Type</span><b>${S.wallet.kind === 'burner' ? 'Quick wallet (this browser)' : 'Phantom'}</b></div>
+      <div class="kv"><span>Balance</span><b class="num">${fmt(S.hack)} HACK</b></div>
+      <div class="kv"><span>Fees paid in</span><b class="num">${S.sol.toFixed(3)} SOL</b></div>
+      <div class="row">
+        <button id="a-copy">Copy address</button>
+        <a class="btn" href="${chain.explorer('address', k)}" target="_blank" rel="noopener">View on explorer</a>
+      </div>
+      ${S.wallet.kind === 'burner'
+        ? '<button id="a-phantom">Switch to Phantom</button>' : ''}
+      <button id="a-out">Log out</button>
+      <p class="small muted" style="margin:0">${S.wallet.kind === 'burner'
+        ? 'Logging out forgets this browser wallet. Its positions stay on-chain, but you need the key to sell them, so copy the address first if you care about them.'
+        : 'Logging out just disconnects Phantom here.'}</p>
+    </div>
+  </div>`);
+  document.body.append(back);
+  animate(back.firstElementChild, [{ transform: 'translateY(24px)', opacity: .4 }, { transform: 'none', opacity: 1 }],
+    { duration: 400, easing: SPRING });
+  back.onclick = (e) => { if (e.target === back) closeSheet(); };
+  $('#a-copy').onclick = async (e) => {
+    press(e.currentTarget);
+    try { await navigator.clipboard.writeText(k); toast('Address copied', 'ok'); }
+    catch { toast('Could not copy \u2014 select it from the explorer page', 'err'); }
+  };
+  const ph = $('#a-phantom');
+  if (ph) ph.onclick = () => { closeSheet(); connect('phantom'); };
+  $('#a-out').onclick = async () => {
+    closeSheet();
+    await S.wallet.disconnect();
+    S.wallet = null;
+    S.balances = new Map();
+    S.hack = 0;
+    S.activity = [];
+    renderWallet();
+    renderView();
+    toast('Logged out', 'ok');
+  };
 }
 
 // ----------------------------------------------------------- market cards
@@ -269,8 +352,8 @@ function renderRail() {
         ${S.hack <= 0 ? `<button class="primary" id="claim">Claim 1,000 HACK</button>` : ''}
         <p class="small muted" style="margin:0">Fees paid in SOL: <span class="num">${S.sol.toFixed(3)}</span>${
           S.wallet.kind === 'burner' ? '<br>Your key lives in this browser only.' : ''}</p>`
-      : `<p class="muted small" style="margin:0">Start trading and you get 1,000 play HACK. No install, no login.</p>
-         <button class="primary" id="rail-connect">Start trading</button>`}
+      : `<p class="muted small" style="margin:0">Log in and you get 1,000 play HACK. No email, nothing to install.</p>
+         <button class="primary" id="rail-connect">Log in</button>`}
     </section>
     <section class="card pad panel">
       <div class="section-head"><h2>Leaderboard</h2><span class="small muted">net worth</span></div>
@@ -280,7 +363,7 @@ function renderRail() {
   const claim = $('#claim');
   if (claim) claim.onclick = (e) => { press(e.currentTarget); doClaim(e.currentTarget); };
   const rc = $('#rail-connect');
-  if (rc) rc.onclick = (e) => { press(e.currentTarget); connect('burner'); };
+  if (rc) rc.onclick = (e) => { press(e.currentTarget); openLogin(); };
   renderBoard($('#board-mini'), 8);
 }
 
@@ -306,7 +389,7 @@ function viewMarkets() {
       <p>Every price on this page is set by a program on Solana, not by us. Buy the outcome you
       believe, sell when the room disagrees, and settle up when the prizes are announced.</p>
       <div class="row"><button class="primary" id="hero-start">Take 1,000 HACK &rarr;</button>
-      <button id="hero-phantom">I have Phantom</button></div>
+      <button id="hero-phantom">I have a wallet</button></div>
     </section>`}
     <div class="stats" id="stats"></div>
     <section class="panel" id="trending-panel">
@@ -448,7 +531,7 @@ function viewDetail() {
         ? `${mine.map((x) => `<div class="kv"><span>${esc(x.o)}</span><b class="num">${fmt(x.h, 2)} shares</b></div>`).join('')}
            <div class="kv"><span>Worth now</span><b class="num">${fmt(mineValue)} HACK</b></div>`
         : '<p class="muted small" style="margin:0">Nothing yet. Pick a side above.</p>')
-      : '<p class="muted small" style="margin:0">Start trading to take a position.</p>'}
+      : '<p class="muted small" style="margin:0">Log in to take a position.</p>'}
     </section>
 
     <section class="card pad panel">
@@ -505,7 +588,7 @@ function viewYou() {
         ${lines.length ? `<h3 class="small" style="margin-top:8px">Holdings</h3>${lines.join('')}`
           : '<p class="muted small" style="margin:0">No positions yet.</p>'}
         ${S.hack <= 0 ? '<button class="primary" id="you-claim">Claim 1,000 HACK</button>' : ''}`
-      : '<p class="muted">Start trading to get your 1,000 HACK.</p><button class="primary" id="you-connect">Start trading</button>'}
+      : '<p class="muted">Log in to get your 1,000 HACK.</p><button class="primary" id="you-connect">Log in</button>'}
     </section>
     <section class="card pad panel">
       <div class="section-head"><h2>Recent trades</h2></div>
@@ -570,7 +653,7 @@ function renderView() {
     const hs = $('#hero-start');
     if (hs) hs.onclick = (e) => { press(e.currentTarget); connect('burner'); };
     const hp = $('#hero-phantom');
-    if (hp) hp.onclick = (e) => { press(e.currentTarget); connect('phantom'); };
+    if (hp) hp.onclick = (e) => { press(e.currentTarget); openLogin(); };
   }
   if (S.view === 'leaders') renderBoard($('#board-full'), 25);
   if (S.view === 'register') setupRegister();
@@ -578,7 +661,7 @@ function renderView() {
     const c = $('#you-claim');
     if (c) c.onclick = (e) => { press(e.currentTarget); doClaim(e.currentTarget); };
     const w = $('#you-connect');
-    if (w) w.onclick = (e) => { press(e.currentTarget); connect('burner'); };
+    if (w) w.onclick = (e) => { press(e.currentTarget); openLogin(); };
   }
   $$('#view > *').forEach((n, i) => popIn(n, i * 60));
   renderRail();
@@ -678,7 +761,7 @@ async function submitTeam() {
 
 // ----------------------------------------------------------- trade sheet
 function openSheet(slug, i, event) {
-  if (!S.wallet) { toast('Start trading first — it takes one tap', 'err'); connect('burner'); return; }
+  if (!S.wallet) { openLogin(); return; }
   const m = bySlug(slug);
   S.sheet = { slug, i, mode: 'buy', origin: event ? { x: event.clientX, y: event.clientY } : null };
   const back = el('<div class="sheet-backdrop" id="sheet-backdrop"></div>');

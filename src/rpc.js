@@ -9,8 +9,28 @@
 import { Connection, ComputeBudgetProgram, Transaction, clusterApiUrl } from '@solana/web3.js';
 import bs58 from 'bs58';
 
-export const RPC_URL = process.env.SOLANA_RPC || clusterApiUrl('devnet');
-export const connection = new Connection(RPC_URL, 'confirmed');
+// SOLANA_RPC may list several endpoints, comma separated. Devnet's public
+// RPC rate-limits an address hard, and at an event that looks like the
+// market going down, so a spare is worth having.
+const RPC_URLS = (process.env.SOLANA_RPC || clusterApiUrl('devnet'))
+  .split(',').map((u) => u.trim()).filter(Boolean);
+export const RPC_URL = RPC_URLS[0];
+const pool = RPC_URLS.map((u) => new Connection(u, 'confirmed'));
+let current = 0;
+export const connection = new Proxy({}, {
+  get(_, prop) {
+    const target = pool[current];
+    const value = target[prop];
+    return typeof value === 'function' ? value.bind(target) : value;
+  },
+});
+/** Move to the next endpoint after a rate limit; returns true if it changed. */
+export function rotateRpc() {
+  if (pool.length < 2) return false;
+  current = (current + 1) % pool.length;
+  console.warn(`[rpc] switching to ${RPC_URLS[current]}`);
+  return true;
+}
 
 const TRANSIENT = /429|Too Many Requests|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|50[23]/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -25,6 +45,7 @@ export async function withRetry(fn, tries = 7) {
       return await fn();
     } catch (e) {
       if (i >= tries - 1 || !TRANSIENT.test(String(e?.message ?? e))) throw e;
+      if (/429|Too Many/i.test(String(e?.message ?? e))) rotateRpc();
       await sleep(800 * 2 ** i);
     }
   }
