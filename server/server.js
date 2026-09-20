@@ -361,7 +361,36 @@ async function handleFaucet(req, body) {
 
 async function route(req, url, body) {
   if (url.pathname === '/api/config') {
-    return [200, { programId: PROGRAM_ID.toBase58(), hackMint: HACK.toBase58(), rpc: RPC_URL, decimals: 6 }];
+    // Deliberately no RPC url: it carries our API key, and every visitor
+    // would have it. Browsers send their transactions through /api/tx/*.
+    return [200, {
+      programId: PROGRAM_ID.toBase58(), hackMint: HACK.toBase58(), decimals: 6,
+      cluster: 'devnet', rpcHost: new URL(RPC_URL).host,
+    }];
+  }
+  if (url.pathname === '/api/tx/blockhash') {
+    const { blockhash, lastValidBlockHeight } = await withRetry(() => connection.getLatestBlockhash('confirmed'));
+    return [200, { blockhash, lastValidBlockHeight }];
+  }
+  if (url.pathname === '/api/tx/send' && req.method === 'POST') {
+    // A relay, not a signer: whatever arrives is already signed by its owner
+    // and we cannot alter it without breaking that signature.
+    const raw = Buffer.from(String(body.tx ?? ''), 'base64');
+    if (!raw.length || raw.length > 1500) return [400, { error: 'bad transaction' }];
+    try {
+      const signature = await withRetry(() => connection.sendRawTransaction(raw, { preflightCommitment: 'confirmed' }));
+      return [200, { signature }];
+    } catch (e) {
+      return [400, { error: String(e.message).slice(0, 300), logs: e.logs ?? [] }];
+    }
+  }
+  if (url.pathname.startsWith('/api/tx/status/')) {
+    const sig = url.pathname.slice('/api/tx/status/'.length);
+    const [{ value }, height] = await Promise.all([
+      withRetry(() => connection.getSignatureStatuses([sig])),
+      withRetry(() => connection.getBlockHeight('confirmed')),
+    ]);
+    return [200, { status: value[0] ?? null, height }];
   }
   if (url.pathname === '/api/markets') return [200, loadMarkets().filter((m) => !m.hidden)];
   if (url.pathname === '/api/history') return [200, history];

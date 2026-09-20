@@ -6,14 +6,32 @@
 // RPC answers one of those with 429, the rejection is unhandled and kills the
 // process. Here every RPC call is awaited and owned, so it can be retried.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Connection, ComputeBudgetProgram, Transaction, clusterApiUrl } from '@solana/web3.js';
 import bs58 from 'bs58';
+
+// The endpoint list lives in data/rpc.txt (gitignored) so the key never
+// reaches the repo and every tool - server, seeder, tests - shares it
+// without anyone remembering to export a variable.
+function configuredRpc() {
+  if (process.env.SOLANA_RPC) return process.env.SOLANA_RPC;
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const file = process.env.MARKET_DATA_DIR
+      ? path.join(path.resolve(process.env.MARKET_DATA_DIR), 'rpc.txt')
+      : path.resolve(here, '..', 'data', 'rpc.txt');
+    const text = fs.readFileSync(file, 'utf8').trim();
+    if (text) return text;
+  } catch { /* fall through to the public endpoint */ }
+  return clusterApiUrl('devnet');
+}
 
 // SOLANA_RPC may list several endpoints, comma separated. Devnet's public
 // RPC rate-limits an address hard, and at an event that looks like the
 // market going down, so a spare is worth having.
-const RPC_URLS = (process.env.SOLANA_RPC || clusterApiUrl('devnet'))
-  .split(',').map((u) => u.trim()).filter(Boolean);
+const RPC_URLS = configuredRpc().split(',').map((u) => u.trim()).filter(Boolean);
 export const RPC_URL = RPC_URLS[0];
 const pool = RPC_URLS.map((u) => new Connection(u, 'confirmed'));
 let current = 0;

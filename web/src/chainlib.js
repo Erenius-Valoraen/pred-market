@@ -1,8 +1,12 @@
 // Browser-side chain access. Mirrors program/src/{lib,state}.rs.
-// Reads go straight to the chain; trades are signed by the user's own wallet.
+//
+// The browser builds and signs its own transactions, but never talks to an
+// RPC endpoint: prices come from /api/state and signed transactions go out
+// through /api/tx/send. That keeps our RPC key on the laptop and means a
+// room full of phones counts as one client, not two hundred.
 
 import {
-  Connection, PublicKey, Transaction, TransactionInstruction, ComputeBudgetProgram,
+  PublicKey, Transaction, TransactionInstruction, ComputeBudgetProgram,
 } from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync,
@@ -11,14 +15,25 @@ import {
 import * as lmsr from '../../src/lmsr.js';
 
 export const UNIT = 1_000_000;
-export let connection;
 export let PROGRAM_ID;
 export let HACK;
 
 export function init(config) {
-  connection = new Connection(config.rpc, 'confirmed');
   PROGRAM_ID = new PublicKey(config.programId);
   HACK = new PublicKey(config.hackMint);
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    : undefined);
+  const json = await res.json();
+  if (!res.ok) {
+    const err = new Error(json.error ?? `request failed (${res.status})`);
+    err.logs = json.logs ?? [];
+    throw err;
+  }
+  return json;
 }
 
 const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
@@ -109,24 +124,27 @@ export function redeemIxs(user, market, winner) {
 }
 
 // ------------------------------------------------------------------- sending
-/** Sign once with the user's wallet, send, poll for confirmation. */
+/** Sign once with the user's wallet, relay it, poll until it confirms. */
 export async function sendWithWallet(wallet, ixs) {
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
   tx.add(...ixs);
   tx.feePayer = wallet.publicKey;
-  const { blockhash, lastValidBlockHeight } = await withRetry(() => connection.getLatestBlockhash('confirmed'));
+  const { blockhash, lastValidBlockHeight } = await withRetry(() => api('/api/tx/blockhash'));
   tx.recentBlockhash = blockhash;
   const signed = await wallet.signTransaction(tx);
   const raw = signed.serialize();
-  const sig = await withRetry(() => connection.sendRawTransaction(raw, { preflightCommitment: 'confirmed' }));
+  const { signature } = await api('/api/tx/send', { tx: btoa(String.fromCharCode(...raw)) });
   for (;;) {
-    const { value } = await withRetry(() => connection.getSignatureStatuses([sig]));
-    const s = value[0];
-    if (s?.err) throw new Error(`transaction failed: ${JSON.stringify(s.err)}`);
-    if (s && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized')) return sig;
-    const h = await withRetry(() => connection.getBlockHeight('confirmed'));
-    if (h > lastValidBlockHeight) throw new Error('transaction expired - try again');
+    const { status, height } = await withRetry(() => api(`/api/tx/status/${signature}`));
+    if (status?.err) {
+      const e = new Error(`transaction failed: ${JSON.stringify(status.err)}`);
+      throw e;
+    }
+    if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) {
+      return signature;
+    }
+    if (height > lastValidBlockHeight) throw new Error('transaction expired - try again');
     await new Promise((res) => setTimeout(res, 700));
   }
 }

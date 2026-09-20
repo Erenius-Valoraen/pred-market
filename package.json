@@ -12,7 +12,8 @@
     "build": "vite build --config web/vite.config.js",
     "dev": "vite --config web/vite.config.js",
     "serve": "node server/server.js",
-    "event": "node tools/run_event.mjs"
+    "event": "node tools/run_event.mjs",
+    "seed:demo": "node src/seed-demo.js"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.8",
