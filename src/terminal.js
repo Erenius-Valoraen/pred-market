@@ -15,6 +15,7 @@
 // Wire format (see tools/radio_node.py):
 //   uplink   "HMK" seq try key   key = "A"row "S"row "B" "N" "P" "L" "R"
 //                                or "G"tag to hand HACK to a touching badge
+//                                (the badge sends that when START is held)
 //                                or "H"name when the app opens
 //   downlink "M" tag cell text   cell = char(48 + 3*row + part); each row is
 //                                sent as up to 3 parts of 13 chars, so every
@@ -243,8 +244,8 @@ export class Terminal {
         if (m) L[1 + r] = itemRow(label(m), m.prices?.[best(m)], m.status === 'resolved');
       }
       L[9] = markets.length > ITEMS
-        ? `A open   page ${s.page + 1}/${Math.ceil(markets.length / ITEMS)}`
-        : 'A open a market';
+        ? `A open  page ${s.page + 1}/${Math.ceil(markets.length / ITEMS)}  hold START pay`
+        : 'A open a market   hold START to pay';
     } else {
       const m = markets[s.mi];
       L[0] = cols(fit(label(m), 22), cash);
@@ -253,7 +254,7 @@ export class Terminal {
         const own = held[i] > 0.001 ? ` x${num(held[i])}` : '';
         L[1 + i] = itemRow(`${o}${own}`, m.prices?.[i], m.status === 'resolved');
       });
-      L[9] = `A buy ${AMOUNTS[s.amt]}  START sell  B back`;
+      L[9] = `A buy ${AMOUNTS[s.amt]}  START sell  B back`;   // hold START = pay
     }
     L[8] = fit(s.status);
     return L.map((x) => fit(x));

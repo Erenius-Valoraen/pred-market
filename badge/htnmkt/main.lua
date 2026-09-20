@@ -9,7 +9,7 @@
 -- Uplink   (badge -> laptop): "HMK" seq try key
 --   key = "A" row   open / buy on the highlighted row      "B" back
 --         "S" row   sell everything on the highlighted row
---         "G" tag   hand 50 HACK to the badge we are touching
+--         "G" tag   hand HACK to the badge we are touching (hold START)
 --         "N"/"P"   no room to move: next / previous page
 --         "L"/"R"   smaller / bigger trade size
 --         "H" name  opened the app
@@ -34,6 +34,7 @@ cg('collect')
 local rows, parts, text = {}, {}, {}
 local cur = 1                       -- highlighted row, 1..7 (0 is the header)
 local peer, peer_at = nil, 0        -- the badge we can hear loudest: a "tap"
+local held = 0                      -- when START went down, for hold-to-pay
 local on, me, seq, key, tries, at, heard = false, nil, 0, nil, 0, 0, false
 
 local function hl(r)
@@ -113,7 +114,15 @@ function on_tick()
 end
 
 function on_button(b, kind)
-  if not on or kind ~= 0 then return end                   -- 0 = pressed
+  if not on then return end
+  if b == 8 then                                           -- START: tap or sell
+    if kind == 0 then held = ms() return end               -- 0 = pressed
+    if ms() - held < 600 then tx("S" .. cur)               -- a quick press sells
+    elseif peer and ms() - peer_at < 4000 then tx("G" .. peer)
+    else rows[9]:set_text("Hold the badges together, then hold START") end
+    return
+  end
+  if kind ~= 0 then return end
   if b == 6 or b == 3 then                                 -- UP / DOWN
     local step = b == 6 and -1 or 1
     for r = cur + step, b == 6 and 1 or 7, step do         -- skip blank rows
@@ -121,11 +130,7 @@ function on_button(b, kind)
     end
     tx(b == 6 and "P" or "N")                              -- edge: ask to page
   elseif b == 0 then tx("A" .. cur)
-  elseif b == 8 then tx("S" .. cur)
   elseif b == 1 then tx("B")
-  elseif b == 7 then                                       -- AUX1: tap to send
-    if peer and ms() - peer_at < 4000 then tx("G" .. peer)
-    else rows[9]:set_text("Hold the badges together, then AUX") end
   elseif b == 4 then tx("L")
   elseif b == 5 then tx("R")
   end
