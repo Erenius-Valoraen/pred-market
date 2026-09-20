@@ -41,7 +41,7 @@ export function createBadgeBackend({ op, hack, marketStates, onWallet = () => {}
   }
   const tick = () => refresh().catch((e) => console.error('[badges] market refresh:', e.message));
   tick();
-  setInterval(tick, 5000).unref();
+  setInterval(tick, 12_000).unref();   // public devnet RPC rate-limits heavy reads
 
   async function ensureWallet(mac, name) {
     let fresh = false;

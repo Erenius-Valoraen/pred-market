@@ -62,6 +62,16 @@ function moveBadge(delta) {
 /** Shares outstanding: how much conviction is actually riding on this. */
 const stakes = (m) => (m.q ?? []).reduce((a, b) => a + b, 0);
 
+/** What one HACK returns if this outcome happens: the bookmaker's number. */
+const payout = (p) => (p > 0.005 ? `${(1 / p).toFixed(2)}\u00d7` : '--');
+
+/** Every slip gets a number. Same market, same number, all event long. */
+function slipNo(m) {
+  let h = 7;
+  for (const c of m.slug) h = (h * 31 + c.charCodeAt(0)) % 9973;
+  return String(h).padStart(4, '0');
+}
+
 function netWorth() {
   let positions = 0;
   for (const m of S.markets) {
@@ -117,8 +127,9 @@ function marketCard(m) {
             const h = held(m, i);
             const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (i === 0 ? 'yes' : 'no');
             return `<button class="side ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
-              <span class="name">${name}${resolved && i === m.winner ? ' \u00b7 won' : ''}</span>
+              <span class="name">${name}</span>
               <span class="price num">${pct(m.prices[i])}</span>
+              <span class="odds num">pays ${payout(m.prices[i])}</span>
               ${h > 0 ? `<span class="held">you hold ${fmt(h, 1)}</span>` : ''}
             </button>`;
           }).join('')}
@@ -130,7 +141,7 @@ function marketCard(m) {
           const cls = resolved ? (i === m.winner ? 'won' : 'lost') : (i === lead ? 'lead' : '');
           return `<button class="lane ${cls}" data-slug="${esc(m.slug)}" data-i="${i}" ${resolved ? 'disabled' : ''}>
             <span class="who">${esc(o)}${h > 0 ? `<span class="muted small"> \u00b7 you hold ${fmt(h, 1)}</span>` : ''}</span>
-            <span class="pct num">${pct(m.prices[i])}</span>
+            <span class="pct num">${pct(m.prices[i])} <span class="odds">${payout(m.prices[i])}</span></span>
             <span class="track"><span class="runner" data-lane="${esc(m.slug)}:${i}"></span></span>
           </button>`;
         }).join('')}
@@ -140,12 +151,11 @@ function marketCard(m) {
   return `<article class="card market ${resolved ? 'resolved' : ''}" data-slug="${esc(m.slug)}">
     <div class="ticker-head">
       <span class="sym">$${esc(symbol(m))}</span>
-      ${resolved ? `<span class="tag">Settled \u00b7 ${esc(m.outcomes[m.winner])}</span>`
-        : team ? '<span class="tag team">Team</span>' : '<span class="tag">Event</span>'}
+      ${team ? '<span class="tag team">Team</span>' : '<span class="tag">Event</span>'}
       <span class="spacer"></span>
-      ${m.createSig ? `<a class="small muted" href="${chain.explorer('tx', m.createSig)}" target="_blank" rel="noopener"
-        title="The creation transaction contains a SHA-256 hash of this question and its outcomes">locked \u2713</a>` : ''}
+      <span class="slip-no">NO. ${slipNo(m)}</span>
     </div>
+    ${resolved ? `<span class="stamp">${esc(m.outcomes[m.winner])} \u00b7 settled</span>` : ''}
     <h3>${esc(m.question)}</h3>
     <div class="quote-line">
       <div>
@@ -154,7 +164,10 @@ function marketCard(m) {
       </div>
       ${moveBadge(delta)}
       <span class="spacer"></span>
-      <span class="small muted">${fmt(stakes(m), 0)} shares out</span>
+      <span class="stake-line">
+        <span class="odds num">pays ${payout(m.prices[shown])}</span>
+        <span class="small muted">${fmt(stakes(m), 0)} shares</span>
+      </span>
     </div>
     ${priceChart(hist, { up: (delta ?? 0) >= 0 })}
     ${body}
@@ -719,10 +732,12 @@ window.addEventListener('resize', () => moveIndicator($('#tab-indicator'), $(`#t
   renderView();
   moveIndicator($('#tab-indicator'), $('#tabs [data-view="markets"]'));
   try {
-    const [config, meta] = await Promise.all([
+    const [config, meta, history] = await Promise.all([
       fetch('/api/config').then((r) => r.json()),
       fetch('/api/markets').then((r) => r.json()),
+      fetch('/api/history').then((r) => r.json()).catch(() => ({})),
     ]);
+    S.history = history;
     chain.init(config);
     S.meta = meta.sort((a, b) => (a.kind === 'team') - (b.kind === 'team'));
     S.wallet = await wallets.restore();
@@ -734,6 +749,8 @@ window.addEventListener('resize', () => moveIndicator($('#tab-indicator'), $(`#t
   renderView();
   await poll();
   pollBoard();
-  setInterval(poll, 5000);
-  setInterval(pollBoard, 20000);
+  // Devnet's public RPC rate-limits the heavy calls, so poll gently: the
+  // market moves when someone trades, and a trade refreshes immediately.
+  setInterval(poll, 11_000);
+  setInterval(pollBoard, 45_000);
 })();

@@ -147,7 +147,7 @@ async function marketStates() {
 
 let boardCache = { at: 0, rows: [] };
 async function leaderboard() {
-  if (Date.now() - boardCache.at < 20_000) return boardCache.rows;
+  if (Date.now() - boardCache.at < 60_000) return boardCache.rows;
   const markets = await marketStates();
   // mint address -> value of one share, straight from on-chain prices
   const shareValue = new Map();
@@ -199,7 +199,7 @@ function carousel() {
 }
 const refreshBoard = () => leaderboard().then((rows) => badgeBackend.setBoard(rows))
   .catch((e) => console.error('[badges] leaderboard:', e.message));
-setInterval(refreshBoard, 20_000).unref();
+setInterval(refreshBoard, 60_000).unref();
 refreshBoard();
 
 // ------------------------------------------------------- price history
