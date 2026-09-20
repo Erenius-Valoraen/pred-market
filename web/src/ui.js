@@ -9,7 +9,8 @@ export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 export const SPRING = 'cubic-bezier(.34,1.56,.64,1)';   // overshoots, then settles
 export const EASE = 'cubic-bezier(.22,.61,.36,1)';
 
-export const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// This is a party trick for a hackathon floor: the motion always runs.
+export const reduced = () => false;
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

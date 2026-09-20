@@ -19,6 +19,7 @@ import {
 
 const S = {
   view: 'markets',
+  filter: 'all',
   meta: [], markets: [], history: {}, board: [],
   wallet: null, balances: new Map(), sol: 0, hack: 0,
   sheet: null, busy: false, lastOk: 0, activity: [],
@@ -229,8 +230,13 @@ function renderMarketsView() {
   const live = S.markets.filter((m) => !m.missing);
   const open = live.filter((m) => m.status !== 'resolved');
   const done = live.filter((m) => m.status === 'resolved');
+  const pick = S.filter === 'team' ? open.filter((m) => m.kind === 'team')
+    : S.filter === 'seed' ? open.filter((m) => m.kind !== 'team')
+    : S.filter === 'done' ? done
+    : [...open, ...done];
   const first = !host.children.length;
-  host.innerHTML = [...open, ...done].map(marketCard).join('');
+  host.innerHTML = pick.length ? pick.map(marketCard).join('')
+    : '<div class="card empty">Nothing here yet.</div>';
   wireMarketCards(host);
   $$('.runner', host).forEach((r) => {
     const [slug, i] = r.dataset.lane.split(':');
@@ -286,18 +292,90 @@ function renderBoard(host, limit) {
 // ------------------------------------------------------------------ views
 function viewMarkets() {
   return `
-    ${S.wallet ? '' : `<section class="card hero">
-      <h1>Bet on who wins Hack the North.</h1>
-      <p>Play money, real Solana. Every price is set by a program on-chain, not by us — and the
-      question was hashed into the transaction that opened each market, so nobody can reword it later.</p>
-      <div class="row"><button class="primary" id="hero-start">Start with 1,000 HACK</button>
-      <button id="hero-phantom">Use Phantom</button></div>
-    </section>`}
     <div class="tape" id="tape" aria-hidden="true"></div>
+    ${S.wallet ? '' : `<section class="card hero">
+      <p class="kicker">Hack the North 2026 &middot; play money, real chain</p>
+      <h1>Put your money where your&nbsp;guess is.</h1>
+      <p>Every price on this page is set by a program on Solana, not by us. Buy the outcome you
+      believe, sell when the room disagrees, and settle up when the prizes are announced.</p>
+      <div class="row"><button class="primary" id="hero-start">Take 1,000 HACK &rarr;</button>
+      <button id="hero-phantom">I have Phantom</button></div>
+    </section>`}
+    <div class="stats" id="stats"></div>
+    <section class="panel" id="trending-panel">
+      <div class="section-head"><h2>Trending</h2><span class="small muted">biggest moves since the market opened</span></div>
+      <div class="trend" id="trending"></div>
+    </section>
     <section class="panel">
-      <div class="section-head"><h2>Markets</h2><span class="small muted" id="market-count"></span></div>
+      <div class="section-head">
+        <h2>All markets</h2>
+        <span class="small muted" id="market-count"></span>
+        <span class="spacer"></span>
+        <div class="filters" id="filters">
+          ${[['all', 'All'], ['team', 'Teams'], ['seed', 'Event'], ['done', 'Settled']].map(([k, label]) =>
+            `<button class="tiny ${S.filter === k ? 'on' : ''}" data-filter="${k}">${label}</button>`).join('')}
+        </div>
+      </div>
       <div class="markets" id="markets-list"></div>
     </section>`;
+}
+
+/** The numbers that tell you the room is alive. */
+function renderStats() {
+  const host = $('#stats');
+  if (!host) return;
+  const live = S.markets.filter((m) => !m.missing);
+  const volume = live.reduce((a, m) => a + stakes(m), 0);
+  const cells = [
+    ['Markets', live.filter((m) => m.status !== 'resolved').length],
+    ['Traders', S.board.length],
+    ['Shares traded', Math.round(volume).toLocaleString('en-US')],
+    ['Teams listed', live.filter((m) => m.kind === 'team').length],
+  ];
+  const key = cells.map((c) => c[1]).join('|');
+  if (!changed('stats', key)) return;
+  host.innerHTML = cells.map(([label, value]) => `
+    <div class="stat"><span class="label">${label}</span><b class="num">${value}</b></div>`).join('');
+}
+
+/** A shelf of the markets that moved most: the reason to look now. */
+function renderTrending() {
+  const host = $('#trending');
+  if (!host) return;
+  const scored = S.markets
+    .filter((m) => !m.missing && m.status !== 'resolved')
+    .map((m) => {
+      const i = isBinary(m) ? 0 : m.prices.indexOf(Math.max(...m.prices));
+      return { m, i, delta: movement(m, i) ?? 0 };
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || stakes(b.m) - stakes(a.m))
+    .slice(0, 6);
+  const key = scored.map((x) => `${x.m.slug}${x.delta}${x.m.prices[x.i].toFixed(3)}`).join('|');
+  if (!changed('trending', key)) return;
+  if (!scored.length) { host.innerHTML = ''; return; }
+  host.innerHTML = scored.map(({ m, i, delta }) => `
+    <button class="trend-card" data-slug="${esc(m.slug)}">
+      <span class="sym">$${esc(symbol(m))}</span>
+      <span class="trend-q">${esc(m.team?.name ?? m.short ?? m.question)}</span>
+      <span class="trend-foot">
+        <b class="num">${pct(m.prices[i])}</b>
+        <span class="move ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}">${
+          delta === 0 ? 'new' : `${delta > 0 ? '\u25b2' : '\u25bc'} ${Math.abs(delta)}`}</span>
+      </span>
+      ${sparkline(series(m, i), { w: 120, h: 26, up: delta >= 0 })}
+    </button>`).join('');
+  $$('.trend-card', host).forEach((b, idx) => {
+    popIn(b, idx * 50);
+    b.onclick = () => {
+      press(b);
+      const card = $(`.market[data-slug="${b.dataset.slug}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (card) {
+        animate(card, [{ transform: 'translate(0,0)' }, { transform: 'translate(-3px,-3px)' }, { transform: 'translate(0,0)' }],
+          { duration: 520, easing: SPRING });
+      }
+    };
+  });
 }
 
 function viewLeaders() {
@@ -375,6 +453,16 @@ function renderView() {
   if (S.view === 'markets') {
     renderMarketsView();
     renderTape();
+    renderTrending();
+    renderStats();
+    $$('#filters button').forEach((b) => {
+      b.onclick = () => {
+        press(b);
+        S.filter = b.dataset.filter;
+        $$('#filters button').forEach((x) => x.classList.toggle('on', x.dataset.filter === S.filter));
+        renderMarketsView();
+      };
+    });
     const hs = $('#hero-start');
     if (hs) hs.onclick = (e) => { press(e.currentTarget); connect('burner'); };
     const hp = $('#hero-phantom');
@@ -691,7 +779,7 @@ async function poll() {
   }
   $('#live').classList.toggle('stale', Date.now() - S.lastOk > 15_000);
   renderWallet();
-  if (S.view === 'markets') { renderMarketsView(); renderTape(); }
+  if (S.view === 'markets') { renderMarketsView(); renderTape(); renderTrending(); renderStats(); }
   if (S.view === 'you') renderView();
   renderRail();
   const count = $('#market-count');
@@ -704,6 +792,7 @@ async function pollBoard() {
     S.board = await (await fetch('/api/leaderboard')).json();
     renderBoard($('#board-mini'), 8);
     renderBoard($('#board-full'), 25);
+    renderStats();
   } catch { /* ignore */ }
   try { S.history = await (await fetch('/api/history')).json(); } catch { /* ignore */ }
   await refreshMeta(false);
