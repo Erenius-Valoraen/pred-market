@@ -25,6 +25,11 @@ const TARGETS = {
   'rox-solo': [0.45, 0.55],                        // YES / NO
   'grand-category': [0.52, 0.16, 0.16, 0.10, 0.06],
   'qnx-pi': [0.70, 0.30],                          // YES / NO
+  // Teams: a believable board has a couple of favourites, a middle and some
+  // long shots. Most of these already sit there; these two ran to an extreme.
+  // No team is a 96% certainty to win a prize, and none is a 1% no-hoper.
+  'team-sleep-later': [0.62, 0.38],
+  'team-the-backrow': [0.09, 0.91],
 };
 
 const op = operatorKeypair();

@@ -49,11 +49,20 @@ function series(m, i) {
   return (S.history[m.slug] ?? []).map((row) => row.p?.[i]).filter((x) => typeof x === 'number');
 }
 
-/** Change since the oldest sample we kept, in percentage points. */
+/**
+ * Change over the last hour, in percentage points.
+ *
+ * Measuring back to the oldest sample we hold sounds more informative and
+ * isn't: a market that opened at 50% and settled at 20% reads "down 30" all
+ * day, so the whole board points down and nothing looks live.
+ */
+const MOVE_WINDOW = 60 * 60 * 1000;
 function movement(m, i) {
-  const h = series(m, i);
-  if (h.length < 2) return null;
-  return Math.round((m.prices[i] - h[0]) * 100);
+  const rows = (S.history[m.slug] ?? []).filter((r) => typeof r.p?.[i] === 'number');
+  if (rows.length < 2) return null;
+  const recent = rows.filter((r) => r.t >= Date.now() - MOVE_WINDOW);
+  const base = recent.length >= 2 ? recent[0] : rows[rows.length - 2];
+  return Math.round((m.prices[i] - base.p[i]) * 100);
 }
 
 function moveBadge(delta) {
@@ -497,7 +506,7 @@ function renderTeamBoard() {
   host.innerHTML = `
     <div class="board-head">
       <span>#</span><span>Team</span><span class="hide-sm">Trend</span>
-      <span class="ralign">Chance</span><span class="ralign hide-sm">Move</span><span></span>
+      <span class="ralign">Chance</span><span class="ralign hide-sm">1h</span><span></span>
     </div>
     ${rows.map(({ m, delta }, n) => {
       const h = held(m, 0) + held(m, 1);
