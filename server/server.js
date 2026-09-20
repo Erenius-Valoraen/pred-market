@@ -290,7 +290,14 @@ async function sampleHistory() {
   for (const m of markets) {
     if (m.missing || !m.prices) continue;
     const row = (history[m.slug] ??= []);
-    row.push({ t: Date.now(), p: m.prices.map((x) => Math.round(x * 1000) / 1000) });
+    const p = m.prices.map((x) => Math.round(x * 1000) / 1000);
+    // Only record a price that moved. A quiet market used to fill the buffer
+    // with identical samples, which pushed the real trades out of the window:
+    // every sparkline went flat and every card said "no move yet" even though
+    // the price had moved that morning.
+    const last = row[row.length - 1];
+    if (last && last.p.length === p.length && last.p.every((x, i) => x === p[i])) continue;
+    row.push({ t: Date.now(), p });
     if (row.length > HISTORY_MAX) row.splice(0, row.length - HISTORY_MAX);
   }
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));

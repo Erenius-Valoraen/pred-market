@@ -1,0 +1,140 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>HTN Market — Devpost thumbnail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=block" rel="stylesheet">
+<style>
+/* Devpost wants 3:2 for the gallery thumbnail, so this page IS 1800x1200 and
+   gets rasterised straight to PNG (see tools/shot_thumbnail.mjs). Everything
+   that has to survive being seen at 400px wide - the wordmark, the headline,
+   the badge - sits in the middle two thirds. */
+:root{
+  --paper:#efe9db; --surface:#fbf8f1; --ink:#14110e; --ink-2:#4a443c; --muted:#837a6c;
+  --line:#d8d0bf; --yes:#146b3a; --yes-soft:#ddebe0; --no:#b3121f; --no-soft:#f6e2e2; --gold:#c8912a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1800px;height:1200px;overflow:hidden;background:var(--paper);
+     font-family:'Space Mono',monospace;color:var(--ink);position:relative}
+.grain{position:absolute;inset:0;opacity:.055;pointer-events:none;
+  background-image:radial-gradient(var(--ink) 1px,transparent 1px);background-size:4px 4px}
+.frame{position:absolute;inset:34px;border:5px solid var(--ink);border-radius:12px;
+       background:var(--surface);overflow:hidden}
+.perf{position:absolute;top:0;left:0;right:0;height:16px;
+  background:radial-gradient(circle at 10px 0, var(--paper) 7px, transparent 7px);
+  background-size:20px 16px;background-repeat:repeat-x}
+
+.wrap{position:absolute;inset:0;display:grid;grid-template-columns:790px 1fr;align-items:center;
+      padding:0 40px 60px 76px}
+
+.eyebrow{display:flex;align-items:center;gap:14px;font-size:21px;letter-spacing:.16em;
+         color:var(--muted);text-transform:uppercase;margin-bottom:26px}
+.dot{width:14px;height:14px;background:var(--yes);border-radius:50%}
+.brandrow{display:flex;align-items:center;gap:22px;margin-bottom:30px}
+.brandrow img{width:96px;height:96px;transform:rotate(-3deg)}
+.brandrow h1{font-family:'Archivo Black',sans-serif;font-size:76px;letter-spacing:-.01em;line-height:1}
+h2{font-family:'Archivo Black',sans-serif;font-size:76px;line-height:1;letter-spacing:-.015em;
+   margin-bottom:32px}
+h2 .hl{background:var(--gold);padding:2px 14px;display:inline-block;transform:rotate(-1.2deg);
+       box-shadow:7px 7px 0 var(--ink)}
+p.lede{font-size:24px;line-height:1.55;color:var(--ink-2);max-width:700px;margin-bottom:36px}
+.chips{display:flex;gap:14px;flex-wrap:wrap}
+.chip{border:3px solid var(--ink);border-radius:8px;background:var(--surface);
+      box-shadow:5px 5px 0 var(--ink);padding:13px 20px;font-weight:700;font-size:21px}
+.chip.gold{background:var(--gold)}
+.chip.green{background:var(--yes-soft);color:var(--yes)}
+
+.stage{position:relative;height:100%}
+/* Badge one is the terminal. Badge two is whoever you tapped. The three
+   slanted bars crossing the gap are Solana's mark doing duty as the thing
+   actually moving - which is the whole product in one picture. */
+.badge{position:absolute;top:150px;left:0;width:452px;height:574px;background:var(--ink);
+       border-radius:38px;transform:rotate(-4deg);box-shadow:16px 16px 0 rgba(20,17,14,.22)}
+.slot{position:absolute;top:30px;left:50%;transform:translateX(-50%);width:120px;height:18px;
+      border-radius:9px;background:#5b544a}
+.screen{position:absolute;top:70px;left:30px;right:30px;bottom:48px;background:var(--paper);
+        border-radius:11px;padding:22px 20px;display:flex;flex-direction:column}
+.srow{display:flex;align-items:center;gap:11px;font-size:17px;color:var(--muted)}
+.sym{background:var(--ink);color:var(--paper);padding:4px 10px;border-radius:5px;font-weight:700;font-size:17px}
+.q{font-family:'Archivo Black',sans-serif;font-size:29px;line-height:1.12;margin:16px 0 10px}
+.lbl{font-size:16px;color:var(--muted);letter-spacing:.14em}
+.big{font-family:'Archivo Black',sans-serif;font-size:82px;line-height:1}
+.sides{display:flex;gap:12px;margin-top:auto}
+.side{flex:1;border:3px solid var(--ink);border-radius:9px;padding:10px 12px}
+.side.y{background:var(--yes-soft);color:var(--yes)}
+.side.n{background:var(--no-soft);color:var(--no)}
+.side b{display:block;font-family:'Archivo Black',sans-serif;font-size:30px;line-height:1.1}
+.side span{font-size:15px}
+.spark{margin:4px 0}
+.waves{position:absolute;top:300px;left:446px}
+.badge2{position:absolute;right:4px;bottom:150px;width:218px;height:278px;background:var(--ink);
+        border-radius:24px;transform:rotate(10deg);box-shadow:12px 12px 0 rgba(20,17,14,.18)}
+.badge2 .slot2{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:62px;height:11px;
+               border-radius:6px;background:#5b544a}
+.badge2 .s2{position:absolute;inset:40px 18px 26px;background:var(--paper);border-radius:8px;
+            display:grid;place-items:center;align-content:center;gap:2px}
+.badge2 .s2 b{font-family:'Archivo Black',sans-serif;font-size:44px;color:var(--yes);line-height:1}
+.badge2 .s2 i{font-style:normal;font-size:16px;color:var(--muted);letter-spacing:.12em}
+.stamp{position:absolute;top:54px;right:26px;border:6px solid var(--no);color:var(--no);
+       font-family:'Archivo Black',sans-serif;font-size:26px;letter-spacing:.08em;padding:10px 16px;
+       border-radius:10px;transform:rotate(9deg);opacity:.85}
+.tape{position:absolute;left:0;right:0;bottom:0;height:76px;background:var(--ink);color:var(--paper);
+      display:flex;align-items:center;gap:50px;padding:0 44px;font-size:23px;overflow:hidden}
+.tape b{color:var(--gold)}
+.up{color:#63c98d} .down{color:#e8737c}
+.slipno{position:absolute;left:46px;bottom:98px;font-size:18px;color:var(--muted);letter-spacing:.1em}
+</style></head><body>
+<div class="grain"></div>
+<div class="frame"><div class="perf"></div>
+ <div class="wrap">
+  <div>
+   <div class="eyebrow"><span class="dot"></span> Hack the North 2026 &middot; live on Solana devnet</div>
+   <div class="brandrow"><img src="icon-broadcast.svg" alt=""><h1>HTN MARKET</h1></div>
+   <h2>Trade the hackathon<br>from <span class="hl">your badge.</span></h2>
+   <p class="lede">A prediction market on every team and every question of the weekend,
+     priced by an LMSR running on-chain. No app, no login, no wallet &mdash; the badge in
+     your lanyard is the trading terminal, and it trades over its own radio.</p>
+   <div class="chips">
+     <span class="chip gold">ESP32-C3 badge</span>
+     <span class="chip">Solana program in Rust</span>
+     <span class="chip green">Tap to pay</span>
+   </div>
+  </div>
+  <div class="stage">
+   <div class="badge">
+     <div class="slot"></div>
+     <div class="screen">
+       <div class="srow"><span class="sym">$HWF</span> HARDWARE &middot; OPEN</div>
+       <div class="q">Will a hardware project win Best Overall?</div>
+       <div class="lbl">CHANCE</div>
+       <div class="big">62%</div>
+       <svg class="spark" width="372" height="70" viewBox="0 0 372 70">
+         <polyline points="6,56 47,49 88,53 129,39 170,43 211,28 252,32 293,18 334,15 366,7"
+           fill="none" stroke="#146b3a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+         <circle cx="366" cy="7" r="9" fill="#14110e"/>
+       </svg>
+       <div class="sides">
+         <div class="side y"><span>YES</span><b>62%</b></div>
+         <div class="side n"><span>NO</span><b>38%</b></div>
+       </div>
+     </div>
+   </div>
+   <svg class="waves" width="286" height="176" viewBox="0 0 286 176">
+     <path d="M24 136 L150 136 L128 166 L2 166 Z" fill="#14110e"/>
+     <path d="M52 78 L196 78 L174 108 L30 108 Z" fill="#146b3a"/>
+     <path d="M80 20 L276 20 L254 50 L58 50 Z" fill="#c8912a"/>
+   </svg>
+   <div class="badge2"><div class="slot2"></div><div class="s2"><b>+50</b><i>HACK</i></div></div>
+   <div class="stamp">LIVE ON DEVNET</div>
+  </div>
+ </div>
+ <div class="slipno">NO. 4711 &mdash; SETTLES AT CLOSING CEREMONY</div>
+ <div class="tape">
+   <span><b>$HWF</b> 62% <span class="up">&#9650;8</span></span>
+   <span><b>$BDG</b> 44% <span class="down">&#9660;5</span></span>
+   <span><b>$DPC</b> 37% <span class="up">&#9650;3</span></span>
+   <span><b>$QNX</b> 41% <span class="down">&#9660;2</span></span>
+   <span><b>$ROX</b> 47% <span class="up">&#9650;6</span></span>
+   <span><b>$MKT</b> 39% <span class="up">&#9650;11</span></span>
+ </div>
+</div>
+</body></html>

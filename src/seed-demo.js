@@ -37,26 +37,34 @@ const TRADERS = arg('traders', 6);
 const TRADES = arg('trades', 36);
 const START_HACK = 1000;
 
+// What people actually type into a registration form at 2 AM: their own
+// names, where they are sitting, or a joke about sleep. The first pass used
+// invented brand names (Northwind, Halcyon, Copperline) and every judge who
+// read the board could tell nobody had entered those.
 const TEAM_BOOK = [
-  ['Northwind', 'Offline-first notes that sync when you get signal', 'E7-114'],
-  ['Halcyon', 'Calmer incident dashboards for on-call engineers', 'E7-036'],
-  ['Ironwood', 'Structural analysis you can run from a phone', 'E5-221'],
-  ['Bluejay', 'Transit alerts that actually arrive before the bus', 'E7-208'],
-  ['Copperline', 'Power monitoring for old buildings', 'DC-160'],
-  ['Quartz', 'Search across everything a team has ever written', 'E5-118'],
-  ['Meridian', 'Scheduling across timezones without the spreadsheet', 'E7-042'],
-  ['Lantern', 'Reading help for low-vision students', 'DC-204'],
-  ['Foxglove', 'Plant health from a cheap camera', 'E5-330'],
-  ['Kestrel', 'Drone flight logs that explain themselves', 'E7-155'],
+  ['Sleep Later', 'Shared grocery list that settles who owes what', 'E7-114'],
+  ['Third Floor E7', 'Room booking that reads the department calendar', 'E7-036'],
+  ['Anya, Raf and Sam', 'Bus arrival times from what riders report', 'E5-221'],
+  ['First Timers', 'A budget app that explains where the money went', 'E7-208'],
+  ['Night Shift', 'On-call handover notes written for you', 'DC-160'],
+  ['Study Group', 'Flashcards made from your own lecture slides', 'E5-118'],
+  ['The Backrow', 'Live captions for lectures, on your phone', 'E7-042'],
+  ['Two Pizzas', 'Splitting a bill by what each person ordered', 'DC-204'],
+  ['Double Double', 'Lecture recordings turned into searchable notes', 'E5-330'],
+  ['Team Poutine', 'Menu photos to allergy warnings', 'E7-155'],
 ];
 
 // The first pass used jokier names; --retire hides those markets so the
 // board reads like a real event. They stay on-chain, just out of sight.
 const RETIRED = [
+  // First pass: programmer in-jokes, which read as written by us.
   'Rubber Duck Debuggers', 'Late Night Compilers', 'Segfault Symphony',
   'Kernel Panic Attack', 'Caffeine Overflow', 'The Merge Conflicts',
   'Undefined Behaviour', 'Null Pointer Express', 'Stack Overflowers',
   'Heap of Trouble', 'UI Smoke Test', 'Test Badge',
+  // Second pass: invented brand names, which read as generated.
+  'Northwind', 'Halcyon', 'Ironwood', 'Bluejay', 'Copperline',
+  'Quartz', 'Meridian', 'Lantern', 'Foxglove', 'Kestrel',
 ];
 
 const TRADER_BOOK = [
