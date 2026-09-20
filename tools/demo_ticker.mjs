@@ -10,6 +10,11 @@
 //
 // Sizes are deliberately small (10-40 HACK): enough to move a price a point
 // or two, not enough to make a market look silly mid-demo.
+//
+// Traders lean against whatever has run too far from where the market opened
+// this session, not towards it. Following the favourite looks right for one
+// trade and then walks every market to 95/5 within the hour - which is both
+// dead to look at and wrong, since these questions are genuinely uncertain.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +24,7 @@ import { sendIxs } from '../src/rpc.js';
 import { buyIx, sellIx, ensureAtaIx, fetchMarket, loadDeployment } from '../src/client.js';
 import { loadMarkets } from '../src/registry.js';
 import * as lmsr from '../src/lmsr.js';
+import { logPrice } from '../src/price-log.js';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -42,6 +48,10 @@ const traders = (() => {
 
 const op = operatorKeypair();
 const hack = new PublicKey(loadDeployment().hackMint);
+
+// Where each market sat when the ticker started: the level to wobble around.
+const anchors = new Map();
+const WANDER = 0.12;            // how far a price may drift before it is pushed back
 let stopping = false;
 process.on('SIGINT', () => { stopping = true; console.log('\nstopping after this trade'); });
 
@@ -63,10 +73,12 @@ while (!stopping) {
       console.log(`${stamp()}  topped up ${trader.name}`);
     }
 
-    // Lean towards whatever is already favoured, but not always: a market
-    // that only ever goes one way stops looking like a market.
-    const favourite = live.prices.indexOf(Math.max(...live.prices));
-    const outcome = Math.random() < 0.65 ? favourite : Math.floor(Math.random() * live.n);
+    // Pick the outcome that has fallen furthest below where this market
+    // opened, with enough noise that it is not a metronome.
+    if (!anchors.has(meta.slug)) anchors.set(meta.slug, live.prices.slice());
+    const anchor = anchors.get(meta.slug);
+    const score = live.prices.map((p, i) => (anchor[i] ?? 1 / live.n) - p + (Math.random() - 0.5) * WANDER);
+    const outcome = score.indexOf(Math.max(...score));
     const spend = Math.min(Math.round(10 + Math.random() * 30), Math.floor(cash) - 1);
     if (spend < 10) continue;
 
@@ -78,6 +90,7 @@ while (!stopping) {
     });
     await sendIxs(op, [ensureAtaIx(op.publicKey, ix.mint, trader.kp.publicKey), ix.ix], [trader.kp]);
     const after = await fetchMarket(market);
+    await logPrice(meta.slug, after.prices);
     const label = meta.team?.name ?? meta.short ?? meta.slug;
     console.log(`${stamp()}  ${trader.name.padEnd(10)} ${String(spend).padStart(2)} HACK on ` +
       `${live.n === 2 ? (outcome ? 'NO ' : 'YES') : `#${outcome}`} ${label}  ->  ` +

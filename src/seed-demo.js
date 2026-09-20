@@ -22,6 +22,7 @@ import { sendIxs } from './rpc.js';
 import { buyIx, sellIx, ensureAtaIx, fetchMarket, loadDeployment } from './client.js';
 import { registerTeam, loadMarkets, saveMarkets } from './registry.js';
 import * as lmsr from './lmsr.js';
+import { logPrice } from './price-log.js';
 
 const DRY = process.argv.includes('--dry');
 const arg = (name, fallback) => {
@@ -183,10 +184,7 @@ async function main() {
 
       // Record the price the program quotes now: this is the real path.
       const after = await fetchMarket(market);
-      const row = (history[meta.slug] ??= []);
-      row.push({ t: Date.now(), p: after.prices.map((x) => Math.round(x * 1000) / 1000) });
-      if (row.length > 120) row.splice(0, row.length - 120);
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+      await logPrice(meta.slug, after.prices);
 
       console.log(`  trade ${String(done).padStart(2)}/${TRADES}  ${trader.name.padEnd(10)} ` +
         `${spend.toString().padStart(3)} HACK on ${live.n === 2 ? (outcome ? 'NO ' : 'YES') : `#${outcome}`} ` +

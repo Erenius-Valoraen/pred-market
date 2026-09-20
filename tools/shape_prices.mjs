@@ -16,21 +16,21 @@ import { sendIxs } from '../src/rpc.js';
 import { buyIx, ensureAtaIx, fetchMarket, loadDeployment } from '../src/client.js';
 import { loadMarkets } from '../src/registry.js';
 import * as lmsr from '../src/lmsr.js';
+import { logPrice } from '../src/price-log.js';
 
 const TARGETS = {
   'hw-finalist-count': [0.08, 0.30, 0.37, 0.25],   // None / One / Two / Three+
   'badge-radio': [0.44, 0.56],                     // YES / NO
   'submissions': [0.10, 0.33, 0.38, 0.19],         // <200 / 200-299 / 300-399 / 400+
   'rox-solo': [0.45, 0.55],                        // YES / NO
-  'grand-category': [0.54, 0.15, 0.15, 0.10, 0.06],
+  'grand-category': [0.52, 0.16, 0.16, 0.10, 0.06],
+  'qnx-pi': [0.70, 0.30],                          // YES / NO
 };
 
 const op = operatorKeypair();
 const hack = new PublicKey(loadDeployment().hackMint);
 const traders = Object.entries(JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'demo-traders.json'), 'utf8')))
   .map(([name, s]) => ({ name, kp: Keypair.fromSecretKey(Uint8Array.from(s)) }));
-const HISTORY = path.join(DATA_DIR, 'history.json');
-const history = JSON.parse(fs.readFileSync(HISTORY, 'utf8'));
 
 for (const [slug, target] of Object.entries(TARGETS)) {
   const meta = loadMarkets().find((m) => m.slug === slug);
@@ -40,14 +40,18 @@ for (const [slug, target] of Object.entries(TARGETS)) {
     const live = await fetchMarket(market);
     const gap = target.map((t, i) => t - live.prices[i]);
     const i = gap.indexOf(Math.max(...gap));
-    if (gap[i] < 0.03) {
+    const error = gap.reduce((a, g) => a + Math.abs(g), 0);
+    if (gap[i] < 0.04 || error < 0.10) {
       console.log(`${slug} settled: ${live.prices.map((p) => Math.round(p * 100) + '%').join(' ')}`);
       break;
     }
+    // Buy roughly the gap, not a fixed lump: a flat 50 HACK moves a market
+    // with five outcomes right past its target and the loop then chases it
+    // back the other way forever.
     const t = traders[step % traders.length];
     let cash = await tokenBalance(hack, t.kp.publicKey);
     if (cash < 140) { await mintAmount(op, hack, t.kp.publicKey, 400); cash += 400; }
-    const spend = Math.min(Math.round(25 + gap[i] * 260), Math.floor(cash) - 1);
+    const spend = Math.min(Math.max(8, Math.round(gap[i] * live.b * 0.55)), Math.floor(cash) - 1);
     const q = lmsr.sharesForBudget(live.q, live.b, i, spend);
     const ix = buyIx({
       user: t.kp.publicKey, market, collateralMint: hack, outcome: i,
@@ -55,8 +59,7 @@ for (const [slug, target] of Object.entries(TARGETS)) {
     });
     await sendIxs(op, [ensureAtaIx(op.publicKey, ix.mint, t.kp.publicKey), ix.ix], [t.kp]);
     const after = await fetchMarket(market);
-    (history[slug] ??= []).push({ t: Date.now(), p: after.prices.map((x) => Math.round(x * 1000) / 1000) });
-    fs.writeFileSync(HISTORY, JSON.stringify(history));
+    await logPrice(slug, after.prices);
     console.log(`  ${t.name.padEnd(10)} ${String(spend).padStart(3)} on ${meta.outcomes[i].padEnd(14)} -> ` +
       after.prices.map((p) => Math.round(p * 100) + '%').join(' '));
   }
