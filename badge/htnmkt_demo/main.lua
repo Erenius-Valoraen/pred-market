@@ -31,18 +31,20 @@ local markets = {
 local SPEND = 50
 local cash = 1000
 
--- a deterministic walk, so the demo behaves the same every time
-local seed = 7
+-- A deterministic walk, so the demo behaves the same every time.
+-- Small constants on purpose: this badge's Lua uses 32-bit integers, and the
+-- usual textbook multiplier overflows them and pins the seed at zero.
+local seed = 4711
 local function rnd()
-  seed = (seed * 1103515245 + 12345) % 2147483648
-  return seed / 2147483648
+  seed = (seed * 75 + 74) % 65537
+  return seed / 65537
 end
 
 for _, m in ipairs(markets) do
   m.hist = {}
   local p = m.p
   for i = 1, 40 do
-    p = max(0.05, min(0.95, p + (rnd() - 0.5) * 0.06))
+    p = max(0.12, min(0.9, p + (rnd() - 0.5) * 0.06))
     m.hist[i] = p
   end
   m.p = m.hist[40]
@@ -203,7 +205,7 @@ function on_tick()
   if now >= nextTick then
     nextTick = now + 2600
     local m = markets[1 + floor(rnd() * #markets)]
-    m.p = max(0.04, min(0.96, m.p + (rnd() - 0.5) * 0.04))
+    m.p = max(0.1, min(0.93, m.p + (rnd() - 0.5) * 0.04))
     m.hist[#m.hist + 1] = m.p
     if #m.hist > 40 then table.remove(m.hist, 1) end
     if flash == 0 then draw() end
